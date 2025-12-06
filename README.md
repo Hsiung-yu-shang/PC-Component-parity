@@ -46,12 +46,42 @@
 
 ### 網路拓樸
 ```mermaid
-graph LR
-    User["使用者 (手機/電腦)"] -- "公網 IP" --> Router
+graph TD
+    User(("使用者<br>(手機/電腦)")) -- "公網 IP" --> Router{"路由器<br>(Router)"}
 
-    subgraph LAN ["區網 (LAN)"]
-        Router -- "Port 8080" --> Frontend["Vue 前端 (.243)"]
-        Router -- "Port 8000" --> Backend["Django API (.242)"]
-        Backend -- "SQL" --> DB[("MySQL 資料庫")]
-        Crawler["爬蟲腳本"] -- "寫入" --> DB
+    subgraph LAN ["區網環境 (LAN)"]
+        style LAN fill:#f5f5f5,stroke:#333,stroke-width:2px
+        
+        %% 1. 前端主機
+        subgraph Host_Frontend ["前端主機 (.243)"]
+            style Host_Frontend fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+            Vue["Vue 3 + Vite<br>(網頁伺服器 :8080)"]
+            Tailwind["Tailwind CSS<br>(樣式框架)"]
+            Vue --- Tailwind
+        end
+
+        %% 2. 後端主機 (運算核心)
+        subgraph Host_Backend ["後端主機 (.242)"]
+            style Host_Backend fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+            direction TB
+            Django["Django API<br>(後端邏輯 :8000)"]
+            Crawler["Python 爬蟲<br>(資料抓取腳本)"]
+        end
+
+        %% 3. 資料庫主機 (儲存層)
+        subgraph Host_DB ["資料庫主機 (.241)"]
+            style Host_DB fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+            MySQL[("MySQL 資料庫<br>(Port 3306)")]
+        end
     end
+
+    %% 外部連線路徑 (Port Forwarding)
+    Router -- "Port 8080<br>(請求網頁)" --> Vue
+    Router -- "Port 8000<br>(請求 API)" --> Django
+
+    %% 內部網路溝通 (跨主機連線)
+    Django <==>|"TCP 連線 (讀取/寫入)"| MySQL
+    Crawler ==>|"TCP 連線 (寫入資料)"| MySQL
+
+    %% 瀏覽器行為
+    Vue -.->|"瀏覽器載入後<br>發送 API 請求"| Router
