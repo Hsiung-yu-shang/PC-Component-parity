@@ -35,14 +35,14 @@
 
 ## 🛠️ 系統架構 (System Architecture)
 
-本專案採用 **前後端分離 (Headless)** 架構，部署於 Rocky Linux 環境。
+本專案採用 **前後端分離 (Headless)** 架構，部署於 Almalinux Linux 環境。
 
 | 角色 | 技術堆疊 | 部署位置 | IP (範例) | Port |
 | :--- | :--- | :--- | :--- | :--- |
 | **Frontend** | Vue 3, Vite, Tailwind CSS | Frontend Server | `192.168.0.243` | `8080` |
-| **Backend** | Python 3, Django, DRF | Rocky Linux | `192.168.0.242` | `8000` |
-| **Database** | MySQL 8.0 | Rocky Linux | `192.168.0.241` | `3306` |
-| **Crawler** | Requests, Custom Regex | Rocky Linux | `192.168.0.242` | - |
+| **Backend** | Python 3, Django, DRF | Almalinux | `192.168.0.242` | `8000` |
+| **Database** | MySQL 8.0 | Almalinux | `192.168.0.241` | `3306` |
+| **Crawler** | Requests, Custom Regex | Almalinux | `192.168.0.242` | - |
 
 ### 網路拓樸
 ```mermaid
