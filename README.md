@@ -41,7 +41,7 @@
 | :--- | :--- | :--- | :--- | :--- |
 | **Frontend** | Vue 3, Vite, Tailwind CSS | Frontend Server | `192.168.0.243` | `8080` |
 | **Backend** | Python 3, Django, DRF | Rocky Linux | `192.168.0.242` | `8000` |
-| **Database** | MySQL 8.0 | Rocky Linux | `192.168.0.242` | `3306` |
+| **Database** | MySQL 8.0 | Rocky Linux | `192.168.0.241` | `3306` |
 | **Crawler** | Requests, Custom Regex | Rocky Linux | `192.168.0.242` | - |
 
 ### 網路拓樸
