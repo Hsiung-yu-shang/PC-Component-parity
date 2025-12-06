@@ -47,11 +47,11 @@
 ### 網路拓樸
 ```mermaid
 graph LR
-    User[使用者 (手機/電腦)] -- 公網 IP --> Router
-    
-    subgraph 區網 (LAN)
-        Router -- Port 8080 --> Frontend[Vue 前端 (.243)]
-        Router -- Port 8000 --> Backend[Django API (.242)]
-        Backend -- SQL --> DB[(MySQL 資料庫)]
-        Crawler[爬蟲腳本] -- 寫入 --> DB
+    User["使用者 (手機/電腦)"] -- "公網 IP" --> Router
+
+    subgraph LAN ["區網 (LAN)"]
+        Router -- "Port 8080" --> Frontend["Vue 前端 (.243)"]
+        Router -- "Port 8000" --> Backend["Django API (.242)"]
+        Backend -- "SQL" --> DB[("MySQL 資料庫")]
+        Crawler["爬蟲腳本"] -- "寫入" --> DB
     end
