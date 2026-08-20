@@ -16,7 +16,7 @@ Including another URLconf
 from django.contrib import admin
 from django.urls  import path, include
 from rest_framework.routers import DefaultRouter
-from core.views import ProductViewSet
+from core.views import ProductViewSet, SyncProductsView
 
 router = DefaultRouter()
 router.register(r'products', ProductViewSet)
@@ -24,4 +24,5 @@ router.register(r'products', ProductViewSet)
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
+    path('api/sync/', SyncProductsView.as_view(), name='product-sync'),
 ]

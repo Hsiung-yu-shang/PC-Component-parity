@@ -142,6 +142,10 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 CORS_ALLOW_ALL_ORIGINS = config('CORS_ALLOW_ALL_ORIGINS', default=False, cast=bool)
 CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='', cast=Csv())
 
+# 手動同步 API（/api/sync/）用的權杖，見 core/permissions.py。
+# 用 `python -c "import secrets; print(secrets.token_urlsafe(32))"` 產生。
+SYNC_API_TOKEN = config('SYNC_API_TOKEN', default='')
+
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.DjangoModelPermissionsOrAnonReadOnly'
