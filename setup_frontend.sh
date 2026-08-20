@@ -1,87 +1,107 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-PROJECT_NAME="pc-price-frontend"
+# PC Component Parity - Frontend deployment
+# Architecture:
+#   Cloudflare Tunnel -> localhost:8080
+#   LAN 192.168.0.0/24 -> server:8080
+#
+# This script intentionally uses Vite preview as requested.
+# It does NOT install/configure Nginx.
 
-echo "=========================================="
-echo "Vue 3 + Tailwind CSS Setup for Rocky Linux"
-echo "=========================================="
+PROJECT_ROOT="${PROJECT_ROOT:-/home/owner/pc_crawler_project}"
+FRONTEND_DIR="${FRONTEND_DIR:-$PROJECT_ROOT/pc-price-frontend}"
+SERVICE_NAME="${SERVICE_NAME:-pc-component-frontend}"
+LAN_CIDR="${LAN_CIDR:-192.168.0.0/24}"
+FRONTEND_PORT="${FRONTEND_PORT:-8080}"
 
-if ! command -v node &> /dev/null; then
-    echo "Installing Node.js 20 LTS..."
-    curl -fsSL https://rpm.nodesource.com∏/setup_20.x | bash -
-    dnf install -y nodejs
-    
-    if ! command -v node &> /dev/null; then
-        echo "Node.js installation failed. Check network or dnf."
-        exit 1
-    fi
-else
-    echo "Node.js installed: $(node -v)"
+echo "==> Frontend deployment"
+echo "Project:  $PROJECT_ROOT"
+echo "Frontend: $FRONTEND_DIR"
+echo "LAN:      $LAN_CIDR"
+echo "Port:     $FRONTEND_PORT"
+
+if [[ ! -d "$FRONTEND_DIR" ]]; then
+    echo "ERROR: Frontend directory not found: $FRONTEND_DIR"
+    exit 1
 fi
 
-if [ -d "$PROJECT_NAME" ]; then
-    echo "Directory $PROJECT_NAME exists. Skipping creation."
-else
-    echo "Creating Vite project..."
-    npm create vite@latest "$PROJECT_NAME" -- --template vue -y
+if ! command -v node >/dev/null 2>&1; then
+    echo "ERROR: Node.js is not installed."
+    exit 1
 fi
 
-cd "$PROJECT_NAME" || exit
-
-echo "Installing dependencies..."
-npm install
-npm install axios
-npm install -D tailwindcss@3.4.17 postcss autoprefixer
-
-echo "Configuring Tailwind..."
-
-cat <<EOF > tailwind.config.js
-/** @type {import('tailwindcss').Config} */
-export default {
-  content: [
-    "./index.html",
-    "./src/**/*.{vue,js,ts,jsx,tsx}",
-  ],
-  theme: {
-    extend: {},
-  },
-  plugins: [],
-}
-EOF
-
-cat <<EOF > postcss.config.js
-export default {
-  plugins: {
-    tailwindcss: {},
-    autoprefixer: {},
-  },
-}
-EOF
-
-echo "Setting up global styles..."
-cat <<EOF > src/style.css
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-EOF
-
-mkdir -p src/components
-
-echo "Configuring firewall..."
-if command -v firewall-cmd &> /dev/null; then
-    firewall-cmd --permanent --add-port=8080/tcp
-    firewall-cmd --permanent --add-port=5173/tcp
-    firewall-cmd --reload
-    echo "Firewall ports opened: $(firewall-cmd --list-ports)"
-else
-    echo "firewall-cmd not found. Skipping firewall setup."
+if ! command -v npm >/dev/null 2>&1; then
+    echo "ERROR: npm is not installed."
+    exit 1
 fi
 
-echo "=========================================="
-echo "Setup Complete"
-echo "=========================================="
-echo "Next steps:"
-echo "1. cd $PROJECT_NAME"
-echo "2. Add App.vue and ProductDetail.vue to src/"
-echo "3. npm run dev -- --host --port 8080"
-echo "=========================================="
+if ! command -v firewall-cmd >/dev/null 2>&1; then
+    echo "ERROR: firewalld/firewall-cmd is required by this deployment script."
+    exit 1
+fi
+
+cd "$FRONTEND_DIR"
+
+echo "==> Installing Node.js dependencies"
+if [[ -f package-lock.json ]]; then
+    npm ci
+else
+    npm install
+fi
+
+echo "==> Building frontend"
+npm run build
+
+if [[ ! -d "$FRONTEND_DIR/dist" ]]; then
+    echo "ERROR: Vite build did not create dist/"
+    exit 1
+fi
+
+echo "==> Configure firewalld"
+# Only allow LAN clients to access frontend port 8080.
+# Cloudflare Tunnel connects locally, so it does not need a public firewall rule.
+firewall-cmd --permanent \
+  --remove-port="${FRONTEND_PORT}/tcp" >/dev/null 2>&1 || true
+
+firewall-cmd --permanent \
+  --remove-rich-rule="rule family=\"ipv4\" port port=\"${FRONTEND_PORT}\" protocol=\"tcp\" accept" \
+  >/dev/null 2>&1 || true
+
+firewall-cmd --permanent \
+  --add-rich-rule="rule family=\"ipv4\" source address=\"${LAN_CIDR}\" port port=\"${FRONTEND_PORT}\" protocol=\"tcp\" accept"
+
+firewall-cmd --reload
+
+echo "==> Installing systemd service: $SERVICE_NAME"
+cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
+[Unit]
+Description=PC Component Parity Vite Frontend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=owner
+Group=owner
+WorkingDirectory=${FRONTEND_DIR}
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/npm run preview -- --host 0.0.0.0 --port ${FRONTEND_PORT}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now "$SERVICE_NAME"
+
+echo
+echo "==> Frontend deployment completed."
+echo "LAN:              http://SERVER_IP:${FRONTEND_PORT}"
+echo "Cloudflare Tunnel: http://127.0.0.1:${FRONTEND_PORT}"
+echo
+echo "Check:"
+echo "  systemctl status ${SERVICE_NAME}"
+echo "  journalctl -u ${SERVICE_NAME} -f"
