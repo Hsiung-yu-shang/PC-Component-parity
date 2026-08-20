@@ -1,13 +1,15 @@
 import os
 import sys
 import django
+from pathlib import Path
 from datetime import datetime
 from pchome_core import PChomeSpider
 
 # === 1. 設定 Django 環境 ===
-# 根據你的環境設定
-PROJECT_PATH = '/home/bearxiong/pc_crawler_project/forge_backend_server'
-sys.path.append(PROJECT_PATH)
+# 以這個檔案的位置為基準，自動推算出 forge_backend_server 的路徑，
+# 這樣不管在哪台機器、哪個帳號底下 clone 這個 repo 都能正常運作。
+PROJECT_PATH = Path(__file__).resolve().parent.parent / 'forge_backend_server'
+sys.path.append(str(PROJECT_PATH))
 
 # 指定 Django 設定檔
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'forge_backend_server.settings')

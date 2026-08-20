@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/3.2/ref/settings/
 """
 
 from pathlib import Path
+from decouple import config, Csv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -20,12 +21,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/3.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-2dm4&am4xfr8$&$(ej55o#(yooc2nn3-)f#q#^n=qm(=k7pb#h'
+# 所有機密設定都改由 .env 檔案提供，.env 不會被 git 追蹤（見 .gitignore）。
+# 請參考 .env.example 建立自己的 .env。
+SECRET_KEY = config('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = config('DEBUG', default=False, cast=bool)
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv())
 
 
 # Application definition
@@ -45,7 +48,6 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
-    'django.middleware.security.SecurityMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -82,11 +84,11 @@ WSGI_APPLICATION = 'forge_backend_server.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'forge_db',
-	'USER': 'forgeowner',
-	'PASSWORD': 'Fcu@M1427629',
-	'HOST': '192.168.0.241',
-	'PORT': '3306',
+        'NAME': config('DB_NAME', default='forge_db'),
+        'USER': config('DB_USER'),
+        'PASSWORD': config('DB_PASSWORD'),
+        'HOST': config('DB_HOST', default='127.0.0.1'),
+        'PORT': config('DB_PORT', default='3306'),
     }
 }
 
@@ -134,7 +136,11 @@ STATIC_URL = '/static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-CORS_ALLOW_ALL_ORIGINS = True
+# 正式環境請在 .env 設定 CORS_ALLOWED_ORIGINS（逗號分隔），例如：
+# CORS_ALLOWED_ORIGINS=https://pcpart.hsiungyusheng.me,http://192.168.0.243:8080
+# 開發時若沒有設定，預設不開放全部來源，避免忘記關閉造成風險。
+CORS_ALLOW_ALL_ORIGINS = config('CORS_ALLOW_ALL_ORIGINS', default=False, cast=bool)
+CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='', cast=Csv())
 
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
