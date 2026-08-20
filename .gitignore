@@ -1,0 +1,33 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+
+# === Virtual environments ===
+venv/
+env/
+.venv/
+
+# === 環境變數 / 機密 ===
+.env
+.env.*
+!.env.example
+
+# === Django ===
+*.sqlite3
+staticfiles/
+
+# === 記錄檔 ===
+logs/
+*.log
+
+# === Node / 前端 ===
+node_modules/
+dist/
+
+# === 編輯器 / 系統 ===
+.vscode/
+.idea/
+.DS_Store
