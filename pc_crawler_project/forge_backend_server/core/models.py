@@ -30,6 +30,12 @@ class Product(models.Model):
     # JSON 欄位：用來存 {"memory": "DDR5", "socket": "LGA1700"}
     specs = models.JSONField(default=dict, blank=True, verbose_name="規格參數 (JSON)")
 
+    # === 上下架狀態 ===
+    # 爬蟲同步時，如果 PChome 已經找不到這個商品，就把 is_active 設 False，
+    # 而不是直接刪除，這樣歷史價格紀錄跟評論才不會跟著消失。
+    is_active = models.BooleanField(default=True, verbose_name="是否仍在架上")
+    delisted_at = models.DateTimeField(null=True, blank=True, verbose_name="下架時間")
+
     class Meta:
         db_table = 'products'
         verbose_name = "電腦零件"
@@ -37,6 +43,7 @@ class Product(models.Model):
         ordering = ['name']
         indexes = [
             models.Index(fields=['name']), # 這裡定義索引就夠了
+            models.Index(fields=['is_active']),
         ]
 
     def __str__(self):
