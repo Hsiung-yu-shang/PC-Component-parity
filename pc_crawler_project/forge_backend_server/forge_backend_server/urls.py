@@ -25,4 +25,5 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
     path('api/sync/', SyncProductsView.as_view(), name='product-sync'),
+    path('api/sync/status/', SyncStatusView.as_view(), name='product-sync-status'),
 ]
