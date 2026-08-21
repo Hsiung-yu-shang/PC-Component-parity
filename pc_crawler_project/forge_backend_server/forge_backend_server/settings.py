@@ -128,7 +128,7 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/3.2/howto/static-files/
-
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 STATIC_URL = '/static/'
 
 # Default primary key field type
@@ -137,7 +137,7 @@ STATIC_URL = '/static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # 正式環境請在 .env 設定 CORS_ALLOWED_ORIGINS（逗號分隔），例如：
-# CORS_ALLOWED_ORIGINS=https://pcpart.hsiungyusheng.me,http://192.168.0.243:8080
+# CORS_ALLOWED_ORIGINS=https://xx.xx.xx.xx,http://192.168.0.243:8080
 # 開發時若沒有設定，預設不開放全部來源，避免忘記關閉造成風險。
 CORS_ALLOW_ALL_ORIGINS = config('CORS_ALLOW_ALL_ORIGINS', default=False, cast=bool)
 CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='', cast=Csv())
