@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/3.2/ref/settings/
 
 from pathlib import Path
 from decouple import config, Csv
+from corsheaders.defaults import default_headers
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -141,6 +142,9 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # 開發時若沒有設定，預設不開放全部來源，避免忘記關閉造成風險。
 CORS_ALLOW_ALL_ORIGINS = config('CORS_ALLOW_ALL_ORIGINS', default=False, cast=bool)
 CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='', cast=Csv())
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    "x-sync-token",
+]
 
 # 手動同步 API（/api/sync/）用的權杖，見 core/permissions.py。
 # 用 `python -c "import secrets; print(secrets.token_urlsafe(32))"` 產生。
