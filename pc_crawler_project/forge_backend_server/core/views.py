@@ -7,7 +7,26 @@ from .models import Product, PriceHistory
 from .serializers import ProductListSerializer, ProductDetailSerializer
 from .permissions import HasSyncToken
 from . import services
+import threading
+import logging
+from django.core.cache import cache
+from django.db import close_old_connections
 
+logger = logging.getLogger(__name__)
+
+SYNC_STATUS_KEY = 'sync_products_status'
+
+def _run_sync_in_background():
+    close_old_connections()
+    try:
+        cache.set(SYNC_STATUS_KEY, {'state': 'running'}, timeout=None)
+        summary = services.sync_products()
+        cache.set(SYNC_STATUS_KEY, {'state': 'done', 'summary': summary}, timeout=3600)
+    except Exception as e:
+        logger.exception("[sync_products] 背景執行失敗")
+        cache.set(SYNC_STATUS_KEY, {'state': 'error', 'error': str(e)}, timeout=3600)
+    finally:
+        close_old_connections()
 
 class ProductViewSet(viewsets.ReadOnlyModelViewSet):
     """
@@ -61,10 +80,39 @@ class SyncProductsView(APIView):
     POST /api/sync/
     Header: X-Sync-Token: <token>
 
-    這支 API 會「同步等待」直到整個爬蟲跑完才回應，
-    依關鍵字數量，實際耗時可能是幾十秒到幾分鐘，請前端做好 loading 提示。
+    這支 API 會立刻回應「已開始」，實際爬蟲在背景執行，
+    避免長時間等待造成 Proxy / Cloudflare 逾時（524）。
+    請改用 GET /api/sync/status/ 查詢目前進度與結果。
     """
     permission_classes = [HasSyncToken]
+
+    def post(self, request):
+        current = cache.get(SYNC_STATUS_KEY)
+        if current and current.get('state') == 'running':
+            return Response(
+                {'status': 'running', 'message': '同步作業已在進行中，請稍後查詢結果'},
+                status=status.HTTP_202_ACCEPTED,
+            )
+
+        thread = threading.Thread(target=_run_sync_in_background, daemon=True)
+        thread.start()
+
+        return Response(
+            {'status': 'started', 'message': '同步已開始，請稍後查詢 /api/sync/status/ 取得結果'},
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+
+class SyncStatusView(APIView):
+    """
+    GET /api/sync/status/
+    查詢最近一次（或正在進行的）同步狀態。
+    """
+    permission_classes = [HasSyncToken]
+
+    def get(self, request):
+        current = cache.get(SYNC_STATUS_KEY, {'state': 'idle'})
+        return Response(current, status=status.HTTP_200_OK)
 
     def post(self, request):
         try:
