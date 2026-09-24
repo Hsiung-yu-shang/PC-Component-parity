@@ -2,8 +2,20 @@
 set -Eeuo pipefail
 
 # Debian 12 / Ubuntu 24.04 systemd LXC; run as root with an existing .env path.
-if [[ ${EUID} -ne 0 || $# -ne 1 || ! -f $1 ]]; then
-  echo 'Usage: sudo bash lxc-install.sh /absolute/path/to/pcpart.env' >&2
+if [[ ${EUID} -ne 0 ]]; then
+  echo '請在 LXC 的 root shell 執行此腳本。' >&2
+  exit 2
+fi
+if [[ $# -ne 1 ]]; then
+  echo '用法：bash lxc-install.sh /root/pcpart.env' >&2
+  exit 2
+fi
+if [[ ! -f $1 ]]; then
+  echo "找不到設定檔：$1。請先依 README 建立 .env，填好資料庫連線與密鑰。" >&2
+  exit 2
+fi
+if grep -Eq '^(SECRET_KEY=replace-with|DB_USER=your_|DB_PASSWORD=your_|DB_HOST=your_|SECRET_KEY=$|DB_USER=$|DB_PASSWORD=$|DB_HOST=$)' "$1"; then
+  echo "設定檔 $1 仍有範例值或空白必要欄位，請先編輯後再部署。" >&2
   exit 2
 fi
 ENV_INPUT=$(realpath "$1")

@@ -6,7 +6,15 @@ Django API 與 Vue 前端，定期同步 PChome 和原價屋的電腦零件價�
 
 現行正式站是分離的 Web、API 與資料庫 VM，公開入口經 Cloudflare Tunnel。新的 `deploy/lxc-install.sh` 可把前端、API 和同步排程放進同一台 **Debian 12 或 Ubuntu 24.04 systemd LXC**，繼續連線既有 MySQL 8 資料庫。資料庫不搬移，舊 PChome 商品與歷史價格會保留；遷移新增 `source` 和 `product_url` 欄位。
 
-部署前在 LXC 建立 `/root/pcpart.env`（可複製 `pc_crawler_project/forge_backend_server/.env.example`），填入 `SECRET_KEY`、`DB_HOST`、`DB_NAME`、`DB_USER`、`DB_PASSWORD`。需要使用網頁上的管理員更新按鈕時，再設定隨機產生的 `SYNC_API_TOKEN`。`DB_HOST` 使用從 LXC 可達的資料庫私網位址；資料庫須允許該 LXC 使用者連線。先備份既有 MySQL 資料庫。不要將 `.env` 提交到 Git。
+部署前在 LXC 建立 `/root/pcpart.env`，填入 `SECRET_KEY`、`DB_HOST`、`DB_NAME`、`DB_USER`、`DB_PASSWORD`。例如在 root shell 下載範本，再編輯：
+
+```bash
+curl -fsSLo /root/pcpart.env https://raw.githubusercontent.com/Hsiung-yu-shang/PC-Component-parity/codex/lxc-dual-source/pc_crawler_project/forge_backend_server/.env.example
+chmod 600 /root/pcpart.env
+nano /root/pcpart.env
+```
+
+若沒有 `nano`，先執行 `apt-get install -y nano`。`DB_HOST` 可填既有資料庫的私網位址；資料庫須允許新 LXC 的 IP 連線。需要使用網頁上的管理員更新按鈕時，再設定隨機產生的 `SYNC_API_TOKEN`。先備份既有 MySQL 資料庫。不要將 `.env` 提交到 Git。
 
 可在 LXC 執行 `python3 -c 'import secrets; print(secrets.token_urlsafe(48))'` 產生新的 `SECRET_KEY`。舊版程式曾把資料庫密碼與 Django 密鑰寫入程式碼；切換時應輪替兩者。
 
