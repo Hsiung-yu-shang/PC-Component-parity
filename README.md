@@ -1,88 +1,38 @@
-# 🖥️ PC Parts Intelligence - 電腦零件智慧比價平台
+# 電腦零件比價網
 
-這是一個基於 **Python Django** 與 **Vue 3** 的全端開發專案，旨在解決電腦組裝時「比價」與「規格相容性」的痛點。
+Django API 與 Vue 前端，定期同步 PChome 和原價屋的電腦零件價格。商品保留各來源的 ID、價格歷史、分類與規格，列表可依來源和分類篩選。
 
-系統透過自動化爬蟲定期抓取電商（如 PChome）資料，並透過 **Regex 規則引擎** 自動分析零件規格（如 DDR4/DDR5、CPU 腳位、顯卡型號），在使用者瀏覽時提供即時的 **相容性警告** 與 **購買建議**。  
-Demo Link : <https://pcpart.hsiungyusheng.me/> (目前沒有
+## 目前部署與搬遷
 
----
+現行正式站是分離的 Web、API 與資料庫 VM，公開入口經 Cloudflare Tunnel。新的 `deploy/lxc-install.sh` 可把前端、API 和同步排程放進同一台 **Debian 12 或 Ubuntu 24.04 systemd LXC**，繼續連線既有 MySQL 8 資料庫。資料庫不搬移，舊 PChome 商品與歷史價格會保留；遷移新增 `source` 和 `product_url` 欄位。
 
-## 🚀 核心功能 (Key Features)
+部署前在 LXC 建立 `/root/pcpart.env`（可複製 `pc_crawler_project/forge_backend_server/.env.example`），填入 `SECRET_KEY`、`DB_HOST`、`DB_NAME`、`DB_USER`、`DB_PASSWORD`。需要使用網頁上的管理員更新按鈕時，再設定隨機產生的 `SYNC_API_TOKEN`。`DB_HOST` 使用從 LXC 可達的資料庫私網位址；資料庫須允許該 LXC 使用者連線。先備份既有 MySQL 資料庫。不要將 `.env` 提交到 Git。
 
-### 1. 🕷️ 自動化價格追蹤
-* **定期爬蟲**：排程腳本自動抓取最新價格。
-* **歷史價格**：記錄每次爬取的價格波動，讓使用者知道何時是最佳買點。
-* **資料清洗**：自動過濾非零件商品（如筆電、周邊）並處理 Emoji 編碼問題。
+可在 LXC 執行 `python3 -c 'import secrets; print(secrets.token_urlsafe(48))'` 產生新的 `SECRET_KEY`。舊版程式曾把資料庫密碼與 Django 密鑰寫入程式碼；切換時應輪替兩者。
 
-### 2. 🧠 智慧規格分析 (Smart Specs Engine)
-系統內建 Python 規則引擎，能從雜亂的商品標題中自動提取結構化資料：
-* **自動分類**：識別 GPU, CPU, MB, RAM, SSD, HDD, PSU。
-* **規格提取**：
-    * **顯卡**：自動抓取型號（如 `RTX 4090`）與顯存（`24G`）。
-    * **硬碟**：區分 `M.2` / `SATA` 介面，識別 `PCIe Gen4` / `Gen5` 速度。
-    * **電源**：自動提取瓦數（`850W`）與轉換效率（`金牌`）。
+先推送 `codex/lxc-dual-source` 測試分支，在 LXC 的 root shell 以一行指令部署該分支：
 
-### 3. 🛡️ 智慧相容性提醒 (Compatibility Check)
-前端 Vue.js 依照規格資料，即時提醒使用者：
-* ⚠️ **記憶體防呆**：選購 DDR5 記憶體時，提醒需搭配支援 DDR5 的主機板。
-* ⚠️ **CPU 腳位**：提醒 LGA1700 或 AM5 的主機板匹配。
-* ⚡ **電源建議**：瀏覽高階顯卡時，自動建議搭配 850W 以上電源。
+```bash
+curl -fsSLo /tmp/pcpart-install.sh https://raw.githubusercontent.com/Hsiung-yu-shang/PC-Component-parity/codex/lxc-dual-source/deploy/lxc-install.sh && PCPART_REF=codex/lxc-dual-source bash /tmp/pcpart-install.sh /root/pcpart.env
+```
 
-### 4. ⚡ 現代化前後端架構
-* **Server-side Searching**：透過 Django DRF 處理搜尋與過濾，支援大量資料查詢。
-* **Smart IP Switching**：前端自動判斷使用者是「內網」還是「外網」，自動切換 API 連線目標。
+測試完成並合併到 GitHub `main` 後，改用正式分支安裝或更新：
 
----
+```bash
+curl -fsSLo /tmp/pcpart-install.sh https://raw.githubusercontent.com/Hsiung-yu-shang/PC-Component-parity/main/deploy/lxc-install.sh && bash /tmp/pcpart-install.sh /root/pcpart.env
+```
 
-## 🛠️ 系統架構 (System Architecture)
+腳本安裝 Python、Node.js、Nginx，執行 `migrate` 與前端建置，建立 Gunicorn API、每六小時同步兩來源的 systemd timer。Nginx 在 LXC 的 `8080` 提供網頁與同源 `/api/`。LXC 完成後，將 `pcpart.hsiungyusheng.me` 的 Tunnel origin 指向 `http://<LXC-IP>:8080`；可再將舊 API hostname 指向同台 `8080`，或保留舊 VM 至確認切換完成。新前端只使用同源 `/api/`。
 
-本專案採用 **前後端分離 (Headless)** 架構，部署於 Almalinux Linux 環境。
+```bash
+systemctl status pcpart-api pcpart-sync.timer
+sudo systemctl start pcpart-sync.service
+journalctl -u pcpart-sync.service -n 100 --no-pager
+curl http://127.0.0.1:8080/api/products/?source=coolpc
+```
 
-| 角色 | 技術堆疊 | 部署位置 | IP (範例) | Port |
-| :--- | :--- | :--- | :--- | :--- |
-| **Frontend** | Vue 3, Vite, Tailwind CSS | Frontend Server | `192.168.0.243` | `8080` |
-| **Backend** | Python 3, Django, DRF | Almalinux | `192.168.0.242` | `8000` |
-| **Database** | MySQL 8.0 | Almalinux | `192.168.0.241` | `3306` |
-| **Crawler** | Requests, Custom Regex | Almalinux | `192.168.0.242` | - |
+原價屋報價來自公開[線上估價頁](https://www.coolpc.com.tw/evaluate.php)，商品連結會回到該估價頁，並非單一商品結帳頁。原價屋是估價參考，最終售價與供貨以店家確認為準。網站標記來源，避免把估價當作 PChome 售價。網頁結構改動可能使解析失效；空結果及大量缺漏時同步不會整批下架原價屋資料。
 
-### 網路拓樸
-```mermaid
-graph TD
-    User(("使用者<br>(手機/電腦)")) -- "公網 IP" --> Router{"路由器<br>(Router)"}
+## 本機開發
 
-    subgraph LAN ["區網環境 (LAN)"]
-        style LAN fill:#f5f5f5,stroke:#333,stroke-width:2px
-        
-        %% 1. 前端主機
-        subgraph Host_Frontend ["前端主機 (.243)"]
-            style Host_Frontend fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
-            Vue["Vue 3 + Vite<br>(網頁伺服器 :8080)"]
-            Tailwind["Tailwind CSS<br>(樣式框架)"]
-            Vue --- Tailwind
-        end
-
-        %% 2. 後端主機 (運算核心)
-        subgraph Host_Backend ["後端主機 (.242)"]
-            style Host_Backend fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
-            direction TB
-            Django["Django API<br>(後端邏輯 :8000)"]
-            Crawler["Python 爬蟲<br>(資料抓取腳本)"]
-        end
-
-        %% 3. 資料庫主機 (儲存層)
-        subgraph Host_DB ["資料庫主機 (.241)"]
-            style Host_DB fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
-            MySQL[("MySQL 資料庫<br>(Port 3306)")]
-        end
-    end
-
-    %% 外部連線路徑 (Port Forwarding)
-    Router -- "Port 8080<br>(請求網頁)" --> Vue
-    Router -- "Port 8000<br>(請求 API)" --> Django
-
-    %% 內部網路溝通 (跨主機連線)
-    Django <==>|"TCP 連線 (讀取/寫入)"| MySQL
-    Crawler ==>|"TCP 連線 (寫入資料)"| MySQL
-
-    %% 瀏覽器行為
-    Vue -.->|"瀏覽器載入後<br>發送 API 請求"| Router
+後端使用 `pc_crawler_project/forge_backend_server/requirements.txt`，設定範本同目錄 `.env.example`；執行 `python manage.py migrate`、`python manage.py runserver`。前端在 `pc-price-frontend` 執行 `npm ci`、`npm run dev`，Vite 會把 `/api` 代理到本機 `8000`。正式環境使用 Gunicorn 與 Nginx，不使用 Django 開發伺服器。

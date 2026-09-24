@@ -18,10 +18,11 @@ const formatDate = (dateString) => {
   return new Date(dateString).toLocaleDateString('zh-TW')
 }
 
-// 前往 PChome
-const goToPChome = () => {
-  const url = `https://24h.pchome.com.tw/prod/${props.product.id}`
-  window.open(url, '_blank')
+const goToStore = () => {
+  const url = props.product.product_url || (props.product.source === 'coolpc'
+    ? 'https://www.coolpc.com.tw/evaluate.php'
+    : `https://24h.pchome.com.tw/prod/${props.product.id}`)
+  window.open(url, '_blank', 'noopener,noreferrer')
 }
 
 // === [核心功能] 智慧相容性檢查引擎 ===
@@ -106,7 +107,7 @@ const smartTips = computed(() => {
         </svg>
         返回列表
       </button>
-      <span class="text-xs text-gray-400">PChome ID: {{ product.id }}</span>
+      <span class="text-xs text-gray-400">{{ product.source === 'coolpc' ? '原價屋' : 'PChome' }} · {{ product.id }}</span>
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 gap-0">
@@ -141,7 +142,7 @@ const smartTips = computed(() => {
             </div>
             <div>
               <h4 class="font-bold text-sm">{{ tip.title }}</h4>
-              <p class="text-sm mt-1 opacity-90 leading-relaxed" v-html="tip.msg.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')"></p>
+              <p class="text-sm mt-1 opacity-90 leading-relaxed">{{ tip.msg.replace(/\*\*/g, '') }}</p>
             </div>
           </div>
         </div>
@@ -168,9 +169,9 @@ const smartTips = computed(() => {
           </div>
           
           <button 
-            @click="goToPChome"
+            @click="goToStore"
             class="w-full sm:w-auto bg-gray-900 hover:bg-black text-white px-8 py-4 rounded-xl font-bold text-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-0.5 flex items-center justify-center gap-2">
-            前往 PChome 購買
+            前往{{ product.source === 'coolpc' ? '原價屋估價頁' : 'PChome 購買' }}
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
               <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z" />
               <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />

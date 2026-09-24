@@ -1,5 +1,6 @@
 from django.conf import settings
 from rest_framework.permissions import BasePermission
+from secrets import compare_digest
 
 
 class HasSyncToken(BasePermission):
@@ -21,4 +22,4 @@ class HasSyncToken(BasePermission):
         # 沒有設定 SYNC_API_TOKEN 的話，一律拒絕，避免預設就開後門
         if not expected:
             return False
-        return token == expected
+        return compare_digest(token, expected)

@@ -14,6 +14,8 @@ class Command(BaseCommand):
             '--max-pages', type=int, default=2,
             help='每個關鍵字抓幾頁，預設 2。'
         )
+        parser.add_argument('--source', action='append', choices=('pchome', 'coolpc'),
+                            help='指定來源，可重複。預設同步兩個來源。')
 
     def handle(self, *args, **options):
         keywords = options.get('keywords')
@@ -23,7 +25,8 @@ class Command(BaseCommand):
             f"=== 開始同步：{len(keywords) if keywords else '預設監控清單'} ==="
         ))
 
-        summary = services.sync_products(keywords=keywords, max_pages=max_pages)
+        summary = services.sync_products(keywords=keywords, max_pages=max_pages,
+                                         sources=options.get('source'))
 
         self.stdout.write(self.style.SUCCESS(
             "同步完成："

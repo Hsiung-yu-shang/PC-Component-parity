@@ -5,14 +5,13 @@
 兩邊都呼叫 sync_products()，避免同一套規則要維護兩份程式碼。
 
 同步邏輯：
-1. 依 WATCH_LIST 逐一關鍵字呼叫 PChomeSpider 抓取。
+1. 依 WATCH_LIST 呼叫 PChomeSpider，並讀取原價屋公開估價頁。
 2. 商品主檔用 update_or_create 寫入/更新（名稱、圖片、規格等）。
 3. 價格只有在跟「上一筆歷史價格」不同時才新增一筆 PriceHistory，
    避免同一個價格每次爬蟲都重複塞一筆一樣的紀錄。
 4. 這次同步範圍內「有抓到」的商品，一律確保 is_active=True（重新上架）。
-5. 這次同步範圍內，資料庫裡「原本是上架狀態、但這次沒抓到」的商品，
-   視為下架：is_active=False，並記錄 delisted_at 時間。
-   （不會真的刪除，歷史價格與評論都會保留。）
+5. 原價屋完整抓取且數量未大幅下降時，將缺席商品標記下架。
+   PChome 是關鍵字與頁數取樣，無法安全推斷商品已下架。
 """
 import logging
 from datetime import datetime
@@ -22,6 +21,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from .crawler import PChomeSpider
+from .coolpc import CoolPCSpider
 from .models import Product, PriceHistory
 
 logger = logging.getLogger(__name__)
@@ -52,6 +52,8 @@ def _save_product(item: Dict, seen_ids: set) -> str:
         id=item['id'],
         defaults={
             'name': item['name'],
+            'source': item.get('source', 'pchome'),
+            'product_url': item.get('product_url', ''),
             'pic_url': item['picS'],
             'description': item['describe'],
             'category': item.get('category', 'OTHER'),
@@ -70,7 +72,8 @@ def _save_product(item: Dict, seen_ids: set) -> str:
     return 'unchanged'
 
 
-def sync_products(keywords: Optional[Iterable[str]] = None, max_pages: int = 2) -> Dict:
+def sync_products(keywords: Optional[Iterable[str]] = None, max_pages: int = 2,
+                  sources: Optional[Iterable[str]] = None) -> Dict:
     """
     執行一次完整同步。
 
@@ -82,19 +85,35 @@ def sync_products(keywords: Optional[Iterable[str]] = None, max_pages: int = 2) 
     started_at = timezone.now()
     keyword_list = list(keywords) if keywords is not None else DEFAULT_WATCH_LIST
 
-    spider = PChomeSpider()
-    seen_ids = set()
+    enabled_sources = set(sources or ('pchome', 'coolpc'))
+    if not enabled_sources or enabled_sources - {'pchome', 'coolpc'}:
+        raise ValueError('sources 必須為 pchome 或 coolpc')
     stats = {'new': 0, 'price_updated': 0, 'unchanged': 0, 'scanned': 0}
+    source_stats = {}
 
-    for keyword in keyword_list:
-        for item in spider.run(keyword, max_pages=max_pages):
+    for source in ('pchome', 'coolpc'):
+        if source not in enabled_sources:
+            continue
+        seen_ids = set()
+        if source == 'pchome':
+            spider = PChomeSpider()
+            items = (item for keyword in keyword_list
+                     for item in spider.run(keyword, max_pages=max_pages))
+        else:
+            items = CoolPCSpider().run()
+        for item in items:
             result = _save_product(item, seen_ids)
             stats[result] += 1
             stats['scanned'] += 1
-
-    # 這次同步範圍內，原本上架、但這次完全沒抓到的商品 → 標記下架
-    delisted_qs = Product.objects.filter(is_active=True).exclude(id__in=seen_ids)
-    delisted_count = delisted_qs.update(is_active=False, delisted_at=timezone.now())
+        # A failed/empty scrape must never delist a complete source. A limited
+        # keyword sync is also not evidence that all other products disappeared.
+        delisted = 0
+        existing_count = Product.objects.filter(source=source, is_active=True).count()
+        if (source == 'coolpc' and len(seen_ids) >= 50
+                and (existing_count == 0 or len(seen_ids) >= existing_count * 0.8)):
+            delisted = Product.objects.filter(source=source, is_active=True).exclude(
+                id__in=seen_ids).update(is_active=False, delisted_at=timezone.now())
+        source_stats[source] = {'scanned': len(seen_ids), 'delisted': delisted}
 
     finished_at = timezone.now()
     summary = {
@@ -106,7 +125,8 @@ def sync_products(keywords: Optional[Iterable[str]] = None, max_pages: int = 2) 
         'new_products': stats['new'],
         'price_updated': stats['price_updated'],
         'unchanged': stats['unchanged'],
-        'delisted': delisted_count,
+        'delisted': sum(value['delisted'] for value in source_stats.values()),
+        'sources': source_stats,
     }
     logger.info("[sync_products] %s", summary)
     return summary

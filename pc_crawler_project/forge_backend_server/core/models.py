@@ -4,7 +4,9 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 
 class Product(models.Model):
     """商品主檔 (對應 products 表)"""
-    id = models.CharField(max_length=64, primary_key=True, verbose_name="PChome ID")
+    id = models.CharField(max_length=64, primary_key=True, verbose_name="來源商品 ID")
+    source = models.CharField(max_length=16, default='pchome', db_index=True, verbose_name="資料來源")
+    product_url = models.URLField(max_length=512, blank=True, default='', verbose_name="商品網址")
     
     # 優化 1: 移除 db_index=True，因為下面 Meta 已經有 indexes 定義了，避免重複
     name = models.CharField(max_length=255, verbose_name="商品名稱")

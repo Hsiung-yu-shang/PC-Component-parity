@@ -1,4 +1,4 @@
-from django.db.models import Prefetch
+from django.db.models import OuterRef, Subquery
 from rest_framework import viewsets, filters, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -40,7 +40,7 @@ class ProductViewSet(viewsets.ReadOnlyModelViewSet):
 
     # === 設定過濾與搜尋功能 ===
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['category', 'is_active']
+    filterset_fields = ['category', 'source', 'is_active']
     search_fields = ['name', 'description']
     ordering_fields = ['name', 'last_updated']
 
@@ -55,12 +55,8 @@ class ProductViewSet(viewsets.ReadOnlyModelViewSet):
         if self.action == 'list':
             # 列表只需要「最新一筆價格」，用 Prefetch 排序後只取第一筆，
             # 避免整包歷史價格塞進 JSON，也避免每個商品多打一次 DB。
-            queryset = queryset.prefetch_related(
-                Prefetch(
-                    'price_history',
-                    queryset=PriceHistory.objects.order_by('-crawled_at')
-                )
-            )
+            latest = PriceHistory.objects.filter(product_id=OuterRef('pk')).order_by('-crawled_at', '-pk')
+            queryset = queryset.annotate(latest_price_value=Subquery(latest.values('price')[:1]))
         else:
             # 詳情頁才把完整歷史價格 + reviews 一起帶出來
             queryset = queryset.prefetch_related('price_history', 'reviews')
@@ -94,6 +90,7 @@ class SyncProductsView(APIView):
                 status=status.HTTP_202_ACCEPTED,
             )
 
+        cache.set(SYNC_STATUS_KEY, {'state': 'running'}, timeout=3600)
         thread = threading.Thread(target=_run_sync_in_background, daemon=True)
         thread.start()
 
@@ -113,13 +110,3 @@ class SyncStatusView(APIView):
     def get(self, request):
         current = cache.get(SYNC_STATUS_KEY, {'state': 'idle'})
         return Response(current, status=status.HTTP_200_OK)
-
-    def post(self, request):
-        try:
-            summary = services.sync_products()
-        except Exception as e:
-            return Response(
-                {'error': f'同步過程發生錯誤：{e}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-        return Response(summary, status=status.HTTP_200_OK)

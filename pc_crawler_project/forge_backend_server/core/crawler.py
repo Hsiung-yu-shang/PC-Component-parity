@@ -156,6 +156,8 @@ class PChomeSpider:
 
         return {
             "id": raw_data.get('Id'),
+            "source": "pchome",
+            "product_url": f"https://24h.pchome.com.tw/prod/{raw_data.get('Id')}",
             "name": clean_name,
             "price": int(raw_data.get('price', 0)),
             "picS": f"https://cs-a.ecimg.tw{raw_data.get('picS')}" if raw_data.get('picS') else "",

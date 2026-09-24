@@ -9,6 +9,7 @@ const loading = ref(false)
 const error = ref(null)
 const searchQuery = ref('') 
 const selectedCategory = ref('') 
+const selectedSource = ref('')
 const systemLastUpdated = ref('')
 
 // [新增] 分頁控制變數
@@ -18,30 +19,12 @@ const totalCount = ref(0)      // 資料庫總筆數
 
 // 控制頁面狀態
 const selectedProduct = ref(null)
-
-// --- 手動同步相關狀態 ---
 const syncing = ref(false)
-const syncResult = ref(null)   // 上次同步結果摘要
-const syncError = ref(null)
+const syncMessage = ref('')
 
-// 後端 API 網址
-//const API_URL = 'http://192.168.0.242:8000/api/products/'
-const currentHost = window.location.hostname
-
-let API_URL = ''
-
-// === [關鍵修改] 智慧判斷邏輯 ===
-if (currentHost === '192.168.0.243') {
-  // 情況 A：如果你在「內網」連前端 (.243)
-  // 強制指引它去連「後端機器 (.242)」
-  API_URL = 'http://192.168.0.242:8000/api/products/'
-} else {
-  // 情況 B：如果你在「外網」連線 (例如 123.110.x.x)
-  // 假設你的路由器有設定 Port 8000 轉發到後端，那就直接用當前的 IP
-  API_URL = `http://${currentHost}:8000/api/products/`
-}
-
-const SYNC_URL = API_URL.replace('/api/products/', '/api/sync/')
+// Nginx serves the API on the same origin. Vite proxies this path in development.
+const API_URL = '/api/products/'
+const SYNC_URL = '/api/sync/'
 
 // 分類選項
 const CATEGORIES = [
@@ -56,9 +39,15 @@ const CATEGORIES = [
   { value: 'OTHER', label: '其他配件 (Other)' },
 ]
 
-const openDetail = (item) => {
+const openDetail = async (item) => {
   selectedProduct.value = item
   window.scrollTo(0, 0)
+  try {
+    const response = await axios.get(`${API_URL}${encodeURIComponent(item.id)}/`)
+    if (selectedProduct.value?.id === item.id) selectedProduct.value = response.data
+  } catch (err) {
+    console.error('商品詳情載入失敗:', err)
+  }
 }
 
 const backToList = () => {
@@ -84,9 +73,11 @@ const fetchProducts = async (url = API_URL) => {
     if (url === API_URL) {
       if (searchQuery.value) params.search = searchQuery.value
       if (selectedCategory.value) params.category = selectedCategory.value
+      if (selectedSource.value) params.source = selectedSource.value
     }
 
-    const response = await axios.get(url, { params })
+    const requestUrl = url === API_URL ? url : `${new URL(url, window.location.origin).pathname}${new URL(url, window.location.origin).search}`
+    const response = await axios.get(requestUrl, { params })
     
     // 處理 DRF 分頁格式
     if (response.data.results) {
@@ -120,37 +111,29 @@ const onCategoryChange = () => {
   fetchProducts(API_URL)
 }
 
-// === 手動同步 ===
-// 這個按鈕只給網站管理者用，一般訪客按了不會有反應（後端會擋掉）。
-// 權杖只存在這次瀏覽的記憶體裡，重新整理頁面就要重新輸入，
-// 故意不存進 localStorage，避免長期留在瀏覽器裡外洩。
 let syncToken = ''
-
 const runSync = async () => {
-  if (!syncToken) {
-    syncToken = window.prompt('請輸入管理員同步權杖 (Sync Token)：') || ''
-    if (!syncToken) return
-  }
-
+  if (!syncToken) syncToken = window.prompt('管理員同步權杖：') || ''
+  if (!syncToken) return
   syncing.value = true
-  syncResult.value = null
-  syncError.value = null
-
+  syncMessage.value = '同步已啟動…'
+  const headers = { 'X-Sync-Token': syncToken }
   try {
-    const response = await axios.post(SYNC_URL, {}, {
-      headers: { 'X-Sync-Token': syncToken },
-      timeout: 5 * 60 * 1000, // 同步可能要跑幾十秒到幾分鐘，拉長逾時時間
-    })
-    syncResult.value = response.data
-    // 同步完重新整理商品列表，讓使用者馬上看到最新結果
-    await fetchProducts(API_URL)
-  } catch (err) {
-    if (err.response?.status === 403) {
-      syncError.value = '權杖錯誤，請確認同步權杖是否正確。'
-      syncToken = '' // 權杖錯誤就清掉，下次重新問
-    } else {
-      syncError.value = err.response?.data?.error || '同步失敗，請確認後端伺服器狀態。'
+    await axios.post(SYNC_URL, {}, { headers })
+    for (let attempt = 0; attempt < 120; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 3000))
+      const { data } = await axios.get(`${SYNC_URL}status/`, { headers })
+      if (data.state === 'done') {
+        syncMessage.value = `同步完成：掃描 ${data.summary.scanned} 筆，價格更新 ${data.summary.price_updated} 筆。`
+        await fetchProducts(API_URL)
+        return
+      }
+      if (data.state === 'error') throw new Error(data.error || '同步失敗')
     }
+    syncMessage.value = '同步仍在執行，請稍後重整頁面。'
+  } catch (err) {
+    if (err.response?.status === 403) syncToken = ''
+    syncMessage.value = err.response?.status === 403 ? '同步權杖無效。' : `同步失敗：${err.message}`
   } finally {
     syncing.value = false
   }
@@ -171,36 +154,23 @@ onMounted(() => {
     <div v-else class="max-w-7xl mx-auto">
       
       <div class="flex flex-col items-center justify-center mb-10 space-y-6">
-        <div class="text-center relative w-full">
+        <div class="text-center">
           <h1 class="text-4xl font-extrabold text-gray-800 tracking-tight">電腦零件比價網</h1>
           <p class="text-gray-500 mt-2">
             共找到 <span class="text-blue-600 font-bold">{{ totalCount }}</span> 筆商品
           </p>
-
-          <button
-            @click="runSync"
-            :disabled="syncing"
-            title="管理員專用：手動觸發爬蟲同步最新價格"
-            class="absolute right-0 top-0 text-xs px-3 py-1.5 rounded-full border transition-colors flex items-center gap-1.5"
-            :class="syncing ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-wait' : 'bg-white text-gray-500 border-gray-300 hover:border-blue-400 hover:text-blue-600'">
-            <svg class="h-3.5 w-3.5" :class="syncing ? 'animate-spin' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-            {{ syncing ? '同步中，請稍候…' : '立即更新' }}
-          </button>
         </div>
 
-        <div v-if="syncResult" class="w-full max-w-3xl bg-green-50 border border-green-200 text-green-800 text-sm rounded-lg px-4 py-3 flex flex-wrap gap-x-4 gap-y-1 items-center">
-          <span class="font-bold">✅ 同步完成（耗時 {{ syncResult.duration_seconds }} 秒）</span>
-          <span>掃描 {{ syncResult.scanned }} 筆</span>
-          <span>新增 {{ syncResult.new_products }}</span>
-          <span>價格更新 {{ syncResult.price_updated }}</span>
-          <span>下架 {{ syncResult.delisted }}</span>
-          <button @click="syncResult = null" class="ml-auto text-green-600 hover:text-green-800">✕</button>
-        </div>
-        <div v-if="syncError" class="w-full max-w-3xl bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 flex items-center justify-between">
-          <span>⚠️ {{ syncError }}</span>
-          <button @click="syncError = null" class="text-red-500 hover:text-red-700">✕</button>
+        <button @click="runSync" :disabled="syncing" class="rounded border border-gray-300 bg-white px-3 py-1 text-xs text-gray-600 disabled:opacity-50">{{ syncing ? '同步中…' : '管理員更新價格' }}</button>
+        <p v-if="syncMessage" class="text-sm text-gray-600">{{ syncMessage }}</p>
+
+        <div class="flex justify-center items-center gap-2 text-sm">
+          <label for="source-filter" class="text-gray-600">資料來源</label>
+          <select id="source-filter" v-model="selectedSource" @change="fetchProducts(API_URL)" class="rounded border border-gray-300 bg-white px-3 py-2">
+            <option value="">全部</option>
+            <option value="pchome">PChome</option>
+            <option value="coolpc">原價屋</option>
+          </select>
         </div>
 
         <div class="w-full max-w-3xl relative flex items-center shadow-lg rounded-full overflow-hidden border border-gray-200 bg-white focus-within:ring-2 focus-within:ring-blue-400">
@@ -270,6 +240,7 @@ onMounted(() => {
               <h2 class="text-gray-800 font-bold text-base leading-snug line-clamp-2 h-10 mb-2 group-hover:text-blue-600 transition-colors" :title="item.name">
                 {{ item.name }}
               </h2>
+              <span class="text-xs text-gray-500 mb-2">{{ item.source === 'coolpc' ? '原價屋' : 'PChome' }}</span>
               
               <div class="flex flex-wrap gap-1 mb-3 h-12 content-start overflow-hidden">
                 <template v-if="item.specs && Object.keys(item.specs).length > 0">
@@ -292,7 +263,7 @@ onMounted(() => {
           <div class="text-6xl mb-4">🔍</div>
           <h3 class="text-lg font-medium text-gray-700">找不到相關商品</h3>
           <p class="mt-2">試著切換分類，或是使用更簡單的關鍵字搜尋。</p>
-          <button @click="searchQuery=''; selectedCategory=''; fetchProducts(API_URL)" class="mt-4 text-blue-600 hover:underline">
+          <button @click="searchQuery=''; selectedCategory=''; selectedSource=''; fetchProducts(API_URL)" class="mt-4 text-blue-600 hover:underline">
             清除所有篩選條件
           </button>
         </div>
