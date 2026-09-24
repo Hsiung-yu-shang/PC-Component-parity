@@ -10,16 +10,16 @@ Django API 與 Vue 前端，定期同步 PChome 和原價屋的電腦零件價�
 
 可在 LXC 執行 `python3 -c 'import secrets; print(secrets.token_urlsafe(48))'` 產生新的 `SECRET_KEY`。舊版程式曾把資料庫密碼與 Django 密鑰寫入程式碼；切換時應輪替兩者。
 
-先推送 `codex/lxc-dual-source` 測試分支，在 LXC 的 root shell 以一行指令部署該分支：
+在全新 Debian／Ubuntu LXC 的 root shell，先安裝下載工具，再部署 `codex/lxc-dual-source` 測試分支：
 
 ```bash
-curl -fsSLo /tmp/pcpart-install.sh https://raw.githubusercontent.com/Hsiung-yu-shang/PC-Component-parity/codex/lxc-dual-source/deploy/lxc-install.sh && PCPART_REF=codex/lxc-dual-source bash /tmp/pcpart-install.sh /root/pcpart.env
+apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl && curl -fsSLo /tmp/pcpart-install.sh https://raw.githubusercontent.com/Hsiung-yu-shang/PC-Component-parity/codex/lxc-dual-source/deploy/lxc-install.sh && PCPART_REF=codex/lxc-dual-source bash /tmp/pcpart-install.sh /root/pcpart.env
 ```
 
 測試完成並合併到 GitHub `main` 後，改用正式分支安裝或更新：
 
 ```bash
-curl -fsSLo /tmp/pcpart-install.sh https://raw.githubusercontent.com/Hsiung-yu-shang/PC-Component-parity/main/deploy/lxc-install.sh && bash /tmp/pcpart-install.sh /root/pcpart.env
+apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl && curl -fsSLo /tmp/pcpart-install.sh https://raw.githubusercontent.com/Hsiung-yu-shang/PC-Component-parity/main/deploy/lxc-install.sh && bash /tmp/pcpart-install.sh /root/pcpart.env
 ```
 
 腳本安裝 Python、Node.js、Nginx，執行 `migrate` 與前端建置，建立 Gunicorn API、每六小時同步兩來源的 systemd timer。Nginx 在 LXC 的 `8080` 提供網頁與同源 `/api/`。LXC 完成後，將 `pcpart.hsiungyusheng.me` 的 Tunnel origin 指向 `http://<LXC-IP>:8080`；可再將舊 API hostname 指向同台 `8080`，或保留舊 VM 至確認切換完成。新前端只使用同源 `/api/`。
