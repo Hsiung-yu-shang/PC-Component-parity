@@ -44,3 +44,29 @@ curl http://127.0.0.1:8080/api/products/?source=coolpc
 ## 本機開發
 
 後端使用 `pc_crawler_project/forge_backend_server/requirements.txt`，設定範本同目錄 `.env.example`；執行 `python manage.py migrate`、`python manage.py runserver`。前端在 `pc-price-frontend` 執行 `npm ci`、`npm run dev`，Vite 會把 `/api` 代理到本機 `8000`。正式環境使用 Gunicorn 與 Nginx，不使用 Django 開發伺服器。
+
+## 商品詳情跨通路比價
+
+商品詳情會自動比對另一來源已收錄、仍上架且有價格的商品，無論從 PChome 或原價屋進入都能使用。標示「原價屋 · 實體通路」和「PChome · 線上購物」，列出各通路價格、價差及最後更新日期。結果依型號及可辨識的容量、版本等規格保守配對；缺少完整料號、散裝／盒裝差異、搭購或無法確認的資料不會硬配對。GPU 不會僅憑 RTX 晶片名稱配對不同品牌或散熱版本。未找到配對不代表該通路没有販售。
+
+比價只查本機資料庫，候選資料快取五分鐘，不會因訪客開頁面對原價屋發出請求。原價屋名稱中的 `{}`／`｛｝` 會立即從 API 顯示移除，括號內的型號文字保留；同步更新名称時仍沿用舊 ID，保留價格歷史。
+
+## 同步頻率及原價屋存取
+
+- 原價屋估價頁最多每六小時一個請求；robots.txt 最多每天檢查一次並遵守其規則。讀取新的 robots 後也會間隔請求。
+- 手動按鈕、systemd 排程和 CLI 共用檔案鎖；整體同步至少間隔 15 分鐘。
+- 403／429 至少等待 24 小時，遵守更長的 Retry-After；連續失敗指數退避至最長 72 小時（伺服器要求更長則依伺服器）。不重試轟炸、繞驗證或切換 IP。
+- 異常頁面、樣本過少及來源錯誤保留原有商品及價格。管理員介面會顯示沿用價格或來源暫停。
+- 生產狀態目錄為 `/var/lib/pcpart`。不要刪除冷卻檔案或為不同同步程序設定不同 `SYNC_STATE_DIR`。這些措施降低負載與封鎖風險，不能保證原價屋不會封鎖。
+
+## 更新此測試分枝
+
+在 LXC 的 root shell 重新下載安裝腳本後執行；使用既有 `/root/pcpart.env`，不需重新填密碼。此版本沒有新增資料庫遷移。
+
+```bash
+curl -fsSLo /tmp/pcpart-install.sh https://raw.githubusercontent.com/Hsiung-yu-shang/PC-Component-parity/codex/lxc-dual-source/deploy/lxc-install.sh && PCPART_REF=codex/lxc-dual-source bash /tmp/pcpart-install.sh /root/pcpart.env
+```
+
+重新載入 `http://10.10.0.249:8080/`，分別從兩個來源進入相同型號商品，確認比價與實體通路標籤。清除 `{}` 不需要先跑爬蟲。正式網域前請確認 Cloudflare HTTPS；安全 Cookie 預設啟用，直接透過 HTTP IP 測試商品頁不受影響，Django admin 登入應使用 HTTPS。
+
+安全檢測結果與適用範圍見 [SECURITY_REVIEW.md](SECURITY_REVIEW.md)。

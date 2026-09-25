@@ -19,6 +19,8 @@ const totalCount = ref(0)      // 資料庫總筆數
 
 // 控制頁面狀態
 const selectedProduct = ref(null)
+const detailLoading = ref(false)
+const detailError = ref('')
 const syncing = ref(false)
 const syncMessage = ref('')
 
@@ -41,12 +43,16 @@ const CATEGORIES = [
 
 const openDetail = async (item) => {
   selectedProduct.value = item
+  detailLoading.value = true
+  detailError.value = ''
   window.scrollTo(0, 0)
   try {
     const response = await axios.get(`${API_URL}${encodeURIComponent(item.id)}/`)
     if (selectedProduct.value?.id === item.id) selectedProduct.value = response.data
   } catch (err) {
-    console.error('商品詳情載入失敗:', err)
+    if (selectedProduct.value?.id === item.id) detailError.value = '商品詳情與比價載入失敗。'
+  } finally {
+    if (selectedProduct.value?.id === item.id) detailLoading.value = false
   }
 }
 
@@ -124,7 +130,9 @@ const runSync = async () => {
       await new Promise(resolve => setTimeout(resolve, 3000))
       const { data } = await axios.get(`${SYNC_URL}status/`, { headers })
       if (data.state === 'done') {
-        syncMessage.value = `同步完成：掃描 ${data.summary.scanned} 筆，價格更新 ${data.summary.price_updated} 筆。`
+        const state = data.summary.sources?.coolpc?.state
+        const note = state === 'cached' ? '原價屋在冷卻期間，沿用上次價格。' : state === 'backoff' ? '原價屋暫停更新，保留上次價格。' : ''
+        syncMessage.value = `同步完成：掃描 ${data.summary.scanned} 筆，價格更新 ${data.summary.price_updated} 筆。${note}`
         await fetchProducts(API_URL)
         return
       }
@@ -133,7 +141,7 @@ const runSync = async () => {
     syncMessage.value = '同步仍在執行，請稍後重整頁面。'
   } catch (err) {
     if (err.response?.status === 403) syncToken = ''
-    syncMessage.value = err.response?.status === 403 ? '同步權杖無效。' : `同步失敗：${err.message}`
+    syncMessage.value = err.response?.status === 403 ? '同步權杖無效。' : (err.response?.data?.detail || `同步失敗：${err.message}`)
   } finally {
     syncing.value = false
   }
@@ -148,7 +156,7 @@ onMounted(() => {
   <div class="min-h-screen bg-gray-50 p-6 font-sans relative">
     
     <div v-if="selectedProduct" class="max-w-7xl mx-auto py-6">
-      <ProductDetail :product="selectedProduct" @back="backToList" />
+      <ProductDetail :product="selectedProduct" :loading="detailLoading" :error="detailError" @back="backToList" @open="openDetail" @retry="openDetail(selectedProduct)" />
     </div>
 
     <div v-else class="max-w-7xl mx-auto">
@@ -169,7 +177,7 @@ onMounted(() => {
           <select id="source-filter" v-model="selectedSource" @change="fetchProducts(API_URL)" class="rounded border border-gray-300 bg-white px-3 py-2">
             <option value="">全部</option>
             <option value="pchome">PChome</option>
-            <option value="coolpc">原價屋</option>
+            <option value="coolpc">原價屋（實體通路）</option>
           </select>
         </div>
 
@@ -240,7 +248,7 @@ onMounted(() => {
               <h2 class="text-gray-800 font-bold text-base leading-snug line-clamp-2 h-10 mb-2 group-hover:text-blue-600 transition-colors" :title="item.name">
                 {{ item.name }}
               </h2>
-              <span class="text-xs text-gray-500 mb-2">{{ item.source === 'coolpc' ? '原價屋' : 'PChome' }}</span>
+              <span class="text-xs text-gray-500 mb-2">{{ item.source === 'coolpc' ? '原價屋 · 實體通路' : 'PChome · 線上購物' }}</span>
               
               <div class="flex flex-wrap gap-1 mb-3 h-12 content-start overflow-hidden">
                 <template v-if="item.specs && Object.keys(item.specs).length > 0">

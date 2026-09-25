@@ -1,8 +1,11 @@
 <script setup>
 import { computed } from 'vue'
+import { storeUrl } from '../storeUrl'
 
 // 接收父層傳來的商品資料
 const props = defineProps({
+  loading: Boolean,
+  error: { type: String, default: '' },
   product: {
     type: Object,
     required: true
@@ -10,7 +13,7 @@ const props = defineProps({
 })
 
 // 定義「返回」事件，通知父層切換回列表
-const emit = defineEmits(['back'])
+const emit = defineEmits(['back', 'open', 'retry'])
 
 // 格式化日期
 const formatDate = (dateString) => {
@@ -19,10 +22,14 @@ const formatDate = (dateString) => {
 }
 
 const goToStore = () => {
-  const url = props.product.product_url || (props.product.source === 'coolpc'
-    ? 'https://www.coolpc.com.tw/evaluate.php'
-    : `https://24h.pchome.com.tw/prod/${props.product.id}`)
-  window.open(url, '_blank', 'noopener,noreferrer')
+  window.open(storeUrl(props.product), '_blank', 'noopener,noreferrer')
+}
+
+const otherStore = computed(() => props.product.source === 'coolpc' ? 'PChome' : '原價屋')
+const priceDifference = (price) => {
+  if (props.product.latest_price == null) return ''
+  const delta = price - props.product.latest_price
+  return delta === 0 ? '與本頁商品同價' : `比本頁商品${delta < 0 ? '便宜' : '貴'} NT$ ${Math.abs(delta).toLocaleString()}`
 }
 
 // === [核心功能] 智慧相容性檢查引擎 ===
@@ -107,7 +114,7 @@ const smartTips = computed(() => {
         </svg>
         返回列表
       </button>
-      <span class="text-xs text-gray-400">{{ product.source === 'coolpc' ? '原價屋' : 'PChome' }} · {{ product.id }}</span>
+      <span class="text-xs text-gray-500">{{ product.source === 'coolpc' ? '原價屋 · 實體通路' : 'PChome · 線上購物' }}</span>
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 gap-0">
@@ -162,7 +169,7 @@ const smartTips = computed(() => {
 
         <div class="mt-auto border-t border-gray-100 pt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div>
-            <span class="block text-xs text-gray-400">目前最低價格</span>
+            <span class="block text-xs text-gray-400">此通路最新紀錄價格</span>
             <span class="text-3xl font-extrabold text-red-600">
               ${{ (product.latest_price || product.price || 0).toLocaleString() }}
             </span>
@@ -181,5 +188,34 @@ const smartTips = computed(() => {
 
       </div>
     </div>
+    <section class="border-t border-gray-200 p-6 md:p-8" aria-live="polite">
+      <h2 class="text-xl font-bold text-gray-900">跨通路比價</h2>
+      <p class="mt-2 text-sm text-gray-500">比較 {{ otherStore }} 已收錄的相同型號，價格以各通路最後同步紀錄為準。</p>
+      <p v-if="loading" class="mt-4 text-gray-500">正在比對商品…</p>
+      <div v-else-if="error" class="mt-4 text-red-700">
+        {{ error }} <button class="underline ml-2" @click="emit('retry')">重新載入</button>
+      </div>
+      <div v-else-if="product.comparisons?.length" class="mt-5 space-y-4">
+        <article v-for="offer in product.comparisons" :key="offer.id" class="rounded-xl border border-gray-200 p-4 sm:flex sm:items-center sm:justify-between gap-4">
+          <div>
+            <span class="text-sm font-bold">{{ offer.source === 'coolpc' ? '原價屋' : 'PChome' }}</span>
+            <span class="ml-2 rounded bg-blue-50 px-2 py-1 text-xs text-blue-800">{{ offer.channel }}</span>
+            <h3 class="mt-3 font-medium text-gray-900">{{ offer.name }}</h3>
+            <p class="mt-1 text-xs text-gray-500">更新於 {{ formatDate(offer.last_updated) }}</p>
+            <p class="mt-1 text-xs text-gray-500">{{ offer.match_note }}</p>
+          </div>
+          <div class="mt-4 sm:mt-0 shrink-0">
+            <p class="text-xl font-bold text-red-600">NT$ {{ offer.latest_price.toLocaleString() }}</p>
+            <p class="mt-1 text-sm text-gray-600">{{ priceDifference(offer.latest_price) }}</p>
+            <div class="mt-3 flex gap-3 text-sm text-blue-700">
+              <button class="underline" @click="emit('open', offer)">查看詳情</button>
+              <a class="underline" :href="storeUrl(offer)" target="_blank" rel="noopener noreferrer">前往通路</a>
+            </div>
+          </div>
+        </article>
+      </div>
+      <p v-else class="mt-4 rounded-lg bg-gray-50 p-4 text-gray-600">目前未找到 {{ otherStore }} 可確認相同型號與規格的商品。</p>
+      <p class="mt-4 text-xs text-gray-500">原價屋標示為實體通路估價參考；實際售價、庫存、搭購條件及保固請向店家確認。</p>
+    </section>
   </div>
 </template>

@@ -6,6 +6,7 @@ from typing import Dict, List, Generator
 
 class PChomeSpider:
     def __init__(self):
+        self.blocked = False
         self.base_url = "https://ecshweb.pchome.com.tw/search/v3.3/all/results"
         self.headers = {
             "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -25,12 +26,16 @@ class PChomeSpider:
         ]
 
     def fetch_data(self, keyword: str, page: int) -> List[Dict]:
+        if self.blocked:
+            return []
         try:
             response = self.session.get(
                 self.base_url, 
                 params={'q': keyword, 'page': page, 'sort': 'sale/dc'}, 
                 timeout=10
             )
+            if response.status_code in (403, 429):
+                self.blocked = True
             response.raise_for_status()
             return response.json().get('prods', [])
         except Exception as e:
@@ -188,4 +193,5 @@ class PChomeSpider:
                 if self.is_valid(clean_prod):
                     yield clean_prod
             
-            time.sleep(random.uniform(1, 2))
+            # Randomness is only used for request pacing, not cryptography.
+            time.sleep(random.uniform(1, 2))  # nosec B311

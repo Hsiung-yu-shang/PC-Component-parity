@@ -22,4 +22,4 @@ class HasSyncToken(BasePermission):
         # 沒有設定 SYNC_API_TOKEN 的話，一律拒絕，避免預設就開後門
         if not expected:
             return False
-        return compare_digest(token, expected)
+        return compare_digest(token.encode('utf-8'), expected.encode('utf-8'))

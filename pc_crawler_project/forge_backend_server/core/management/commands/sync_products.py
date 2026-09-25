@@ -1,9 +1,10 @@
 from django.core.management.base import BaseCommand
 from core import services
+from core.sync_state import SyncBusy
 
 
 class Command(BaseCommand):
-    help = "同步商品資料：抓取 PChome 最新資料、更新價格、標記下架商品。"
+    help = "同步 PChome 與原價屋；遵守來源冷卻與共用同步鎖。"
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -25,8 +26,12 @@ class Command(BaseCommand):
             f"=== 開始同步：{len(keywords) if keywords else '預設監控清單'} ==="
         ))
 
-        summary = services.sync_products(keywords=keywords, max_pages=max_pages,
-                                         sources=options.get('source'))
+        try:
+            summary = services.sync_products(keywords=keywords, max_pages=max_pages,
+                                             sources=options.get('source'))
+        except SyncBusy as exc:
+            self.stdout.write(self.style.WARNING(str(exc)))
+            return
 
         self.stdout.write(self.style.SUCCESS(
             "同步完成："
@@ -36,3 +41,5 @@ class Command(BaseCommand):
             f"下架 {summary['delisted']}、"
             f"耗時 {summary['duration_seconds']} 秒"
         ))
+        for source, result in summary['sources'].items():
+            self.stdout.write(f"{source}: {result['state']}，掃描 {result['scanned']} 筆")

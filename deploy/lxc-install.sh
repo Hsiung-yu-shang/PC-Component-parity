@@ -56,9 +56,10 @@ else
 fi
 
 install -m 0640 -o root -g pcpart "$ENV_INPUT" "$BACKEND/.env"
+install -d -m 0700 -o pcpart -g pcpart /var/lib/pcpart
 python3 -m venv "$APP_DIR/.venv"
 "$APP_DIR/.venv/bin/pip" install --upgrade pip
-"$APP_DIR/.venv/bin/pip" install -r "$BACKEND/requirements.txt"
+"$APP_DIR/.venv/bin/pip" install --upgrade -r "$BACKEND/requirements.txt"
 cd "$FRONTEND"
 npm ci
 npm run build
@@ -77,6 +78,9 @@ Wants=network-online.target
 User=pcpart
 Group=pcpart
 WorkingDirectory=$BACKEND
+Environment=SYNC_STATE_DIR=/var/lib/pcpart
+NoNewPrivileges=true
+UMask=0077
 ExecStart=$APP_DIR/.venv/bin/gunicorn forge_backend_server.wsgi:application --bind 127.0.0.1:8000 --workers 1 --threads 4 --timeout 60
 Restart=on-failure
 RestartSec=5
@@ -96,6 +100,9 @@ Type=oneshot
 User=pcpart
 Group=pcpart
 WorkingDirectory=$BACKEND
+Environment=SYNC_STATE_DIR=/var/lib/pcpart
+NoNewPrivileges=true
+UMask=0077
 ExecStart=$APP_DIR/.venv/bin/python manage.py sync_products
 EOF
 
@@ -114,13 +121,31 @@ WantedBy=timers.target
 EOF
 
 cat >/etc/nginx/sites-available/pcpart <<EOF
+limit_req_zone \$binary_remote_addr zone=pcpart_api:10m rate=10r/s;
+limit_req_zone \$binary_remote_addr zone=pcpart_sync:1m rate=1r/m;
 server {
     listen 8080;
+    server_tokens off;
+    client_max_body_size 64k;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+    add_header X-Frame-Options DENY always;
+    location ~ /\. { deny all; }
+    location = /api/sync/ {
+        limit_req zone=pcpart_sync burst=2 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-Real-IP \$remote_addr;
+    }
     server_name _;
     root $FRONTEND/dist;
     index index.html;
 
     location ~ ^/(api|admin)/ {
+        limit_req zone=pcpart_api burst=40 nodelay;
+        limit_req_status 429;
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host \$host;
         proxy_set_header X-Forwarded-Proto \$scheme;

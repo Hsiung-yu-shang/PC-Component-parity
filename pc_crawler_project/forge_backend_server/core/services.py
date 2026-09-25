@@ -21,7 +21,9 @@ from django.db import transaction
 from django.utils import timezone
 
 from .crawler import PChomeSpider
-from .coolpc import CoolPCSpider
+from .coolpc import CoolPCSpider, SourceUnavailable
+from .sync_state import reserve_sync, finish_sync
+from django.core.cache import cache
 from .models import Product, PriceHistory
 
 logger = logging.getLogger(__name__)
@@ -72,7 +74,7 @@ def _save_product(item: Dict, seen_ids: set) -> str:
     return 'unchanged'
 
 
-def sync_products(keywords: Optional[Iterable[str]] = None, max_pages: int = 2,
+def _sync_products(keywords: Optional[Iterable[str]] = None, max_pages: int = 2,
                   sources: Optional[Iterable[str]] = None) -> Dict:
     """
     執行一次完整同步。
@@ -100,11 +102,17 @@ def sync_products(keywords: Optional[Iterable[str]] = None, max_pages: int = 2,
             items = (item for keyword in keyword_list
                      for item in spider.run(keyword, max_pages=max_pages))
         else:
-            items = CoolPCSpider().run()
-        for item in items:
-            result = _save_product(item, seen_ids)
-            stats[result] += 1
-            stats['scanned'] += 1
+            spider = CoolPCSpider()
+            items = spider.run()
+        try:
+            for item in items:
+                result = _save_product(item, seen_ids)
+                stats[result] += 1
+                stats['scanned'] += 1
+        except SourceUnavailable:
+            logger.warning('原價屋同步已暫停，保留既有資料。', exc_info=True)
+            source_stats[source] = {'scanned': 0, 'delisted': 0, 'state': 'backoff'}
+            continue
         # A failed/empty scrape must never delist a complete source. A limited
         # keyword sync is also not evidence that all other products disappeared.
         delisted = 0
@@ -113,7 +121,10 @@ def sync_products(keywords: Optional[Iterable[str]] = None, max_pages: int = 2,
                 and (existing_count == 0 or len(seen_ids) >= existing_count * 0.8)):
             delisted = Product.objects.filter(source=source, is_active=True).exclude(
                 id__in=seen_ids).update(is_active=False, delisted_at=timezone.now())
-        source_stats[source] = {'scanned': len(seen_ids), 'delisted': delisted}
+        source_stats[source] = {'scanned': len(seen_ids), 'delisted': delisted,
+                                'state': 'cached' if getattr(spider, 'skipped', False) else 'updated'}
+        for category, _ in Product.CATEGORY_CHOICES:
+            cache.delete(f'comparison-v1:{source}:{category}')
 
     finished_at = timezone.now()
     summary = {
@@ -130,3 +141,15 @@ def sync_products(keywords: Optional[Iterable[str]] = None, max_pages: int = 2,
     }
     logger.info("[sync_products] %s", summary)
     return summary
+
+
+def sync_products(keywords=None, max_pages=2, sources=None, reservation=None):
+    handle = reservation if reservation is not None else reserve_sync()
+    with handle:
+        try:
+            summary = _sync_products(keywords, max_pages, sources)
+            finish_sync(state='done', summary=summary)
+            return summary
+        except Exception:
+            finish_sync(state='error', error='同步失敗，請管理員查看服務紀錄。')
+            raise
