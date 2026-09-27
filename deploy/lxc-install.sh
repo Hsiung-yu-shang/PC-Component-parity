@@ -34,9 +34,11 @@ apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl gnupg git \
   python3 python3-venv python3-dev build-essential pkg-config default-libmysqlclient-dev nginx
 
-if ! command -v node >/dev/null || [[ $(node -v | cut -d. -f1 | tr -d v) -lt 20 ]]; then
-  curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/pcpart-nodesource.sh
-  bash /tmp/pcpart-nodesource.sh
+if ! command -v node >/dev/null || ! node -e 'const [major,minor]=process.versions.node.split(".").map(Number); process.exit((major===20 && minor>=19)||(major===22 && minor>=12)||major>22 ? 0 : 1)'; then
+  NODE_SETUP=$(mktemp /tmp/pcpart-nodesource.XXXXXXXX)
+  trap 'rm -f "$NODE_SETUP"' EXIT
+  curl -fsSL https://deb.nodesource.com/setup_22.x -o "$NODE_SETUP"
+  bash "$NODE_SETUP"
   DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
 fi
 
@@ -60,6 +62,10 @@ install -d -m 0700 -o pcpart -g pcpart /var/lib/pcpart
 python3 -m venv "$APP_DIR/.venv"
 "$APP_DIR/.venv/bin/pip" install --upgrade pip
 "$APP_DIR/.venv/bin/pip" install --upgrade -r "$BACKEND/requirements.txt"
+cd "$BACKEND"
+"$APP_DIR/.venv/bin/python" manage.py check --deploy
+# Check the same environment and service account before the frontend build.
+runuser -u pcpart -- "$APP_DIR/.venv/bin/python" manage.py shell -c 'from django.db import connection; connection.ensure_connection(); print("Database connection OK")'
 cd "$FRONTEND"
 npm ci
 npm run build
@@ -160,6 +166,18 @@ nginx -t
 systemctl daemon-reload
 systemctl enable --now pcpart-api.service pcpart-sync.timer nginx
 systemctl restart pcpart-api.service nginx
-curl -fsS http://127.0.0.1:8080/ >/dev/null
+READY=0
+for attempt in {1..15}; do
+  if curl -fsS --max-time 10 http://127.0.0.1:8080/api/health/ >/dev/null; then
+    READY=1
+    break
+  fi
+  sleep 2
+done
+if [[ $READY -ne 1 ]]; then
+  echo 'API 或資料庫健康檢查失敗：請執行 journalctl -u pcpart-api -n 100' >&2
+  exit 1
+fi
+curl -fsS --max-time 10 http://127.0.0.1:8080/ >/dev/null
 echo 'Installed. Point the Cloudflare Tunnel frontend origin to http://<LXC-IP>:8080.'
 echo 'Check: systemctl status pcpart-api pcpart-sync.timer; journalctl -u pcpart-sync -n 100'

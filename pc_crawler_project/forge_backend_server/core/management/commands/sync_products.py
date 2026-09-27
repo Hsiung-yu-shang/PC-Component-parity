@@ -1,6 +1,7 @@
 from django.core.management.base import BaseCommand
 from core import services
 from core.sync_state import SyncBusy
+from core.sources import SOURCES
 
 
 class Command(BaseCommand):
@@ -12,11 +13,11 @@ class Command(BaseCommand):
             help='只同步指定關鍵字，可重複帶多次 --keyword。不帶則使用預設監控清單。'
         )
         parser.add_argument(
-            '--max-pages', type=int, default=2,
-            help='每個關鍵字抓幾頁，預設 2。'
+            '--max-pages', type=int, default=None,
+            help='每個關鍵字 1–5 頁，預設依 SYNC_MAX_PAGES。'
         )
-        parser.add_argument('--source', action='append', choices=('pchome', 'coolpc'),
-                            help='指定來源，可重複。預設同步兩個來源。')
+        parser.add_argument('--source', action='append', choices=tuple(SOURCES),
+                            help='指定來源，可重複。預設同步 SYNC_SOURCES 啟用的來源。')
 
     def handle(self, *args, **options):
         keywords = options.get('keywords')

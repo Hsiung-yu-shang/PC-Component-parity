@@ -1,4 +1,5 @@
 export function storeUrl(product) {
+  if (!['pchome', 'coolpc'].includes(product.source)) return ''
   const fallback = product.source === 'coolpc'
     ? 'https://www.coolpc.com.tw/evaluate.php'
     : `https://24h.pchome.com.tw/prod/${encodeURIComponent(product.id)}`

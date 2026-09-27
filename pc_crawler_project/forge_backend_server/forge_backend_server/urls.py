@@ -16,13 +16,15 @@ Including another URLconf
 from django.contrib import admin
 from django.urls  import path, include
 from rest_framework.routers import DefaultRouter
-from core.views import ProductViewSet, SyncProductsView, SyncStatusView
+from core.views import ProductViewSet, SyncProductsView, SyncStatusView, SourceListView, HealthView
 
 router = DefaultRouter()
 router.register(r'products', ProductViewSet)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('api/sources/', SourceListView.as_view()),
+    path('api/health/', HealthView.as_view()),
     path('api/', include(router.urls)),
     path('api/sync/', SyncProductsView.as_view(), name='product-sync'),
     path('api/sync/status/', SyncStatusView.as_view(), name='product-sync-status'),

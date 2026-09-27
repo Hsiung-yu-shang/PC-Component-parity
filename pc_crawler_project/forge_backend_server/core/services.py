@@ -14,15 +14,15 @@
    PChome 是關鍵字與頁數取樣，無法安全推斷商品已下架。
 """
 import logging
-from datetime import datetime
-from typing import Dict, Iterable, List, Optional
+from django.conf import settings
+from typing import Dict
 
 from django.db import transaction
 from django.utils import timezone
 
-from .crawler import PChomeSpider
-from .coolpc import CoolPCSpider, SourceUnavailable
+from .source_errors import SourceUnavailable
 from .sync_state import reserve_sync, finish_sync
+from .sources import SOURCES, resolve_sources
 from django.core.cache import cache
 from .models import Product, PriceHistory
 
@@ -66,7 +66,7 @@ def _save_product(item: Dict, seen_ids: set) -> str:
     )
     seen_ids.add(prod_obj.id)
 
-    latest = prod_obj.price_history.order_by('-crawled_at').first()
+    latest = prod_obj.price_history.order_by('-crawled_at', '-pk').first()
     if latest is None or latest.price != item['price']:
         PriceHistory.objects.create(product=prod_obj, price=item['price'])
         return 'new' if created else 'price_updated'
@@ -74,76 +74,58 @@ def _save_product(item: Dict, seen_ids: set) -> str:
     return 'unchanged'
 
 
-def _sync_products(keywords: Optional[Iterable[str]] = None, max_pages: int = 2,
-                  sources: Optional[Iterable[str]] = None) -> Dict:
-    """
-    執行一次完整同步。
-
-    keywords: 要爬取的關鍵字清單，預設用 DEFAULT_WATCH_LIST。
-    max_pages: 每個關鍵字抓幾頁。
-
-    回傳同步結果摘要 dict，方便 API / 指令列印或回傳給前端。
-    """
+def _sync_products(keywords=None, max_pages=None, sources=None):
     started_at = timezone.now()
-    keyword_list = list(keywords) if keywords is not None else DEFAULT_WATCH_LIST
-
-    enabled_sources = set(sources or ('pchome', 'coolpc'))
-    if not enabled_sources or enabled_sources - {'pchome', 'coolpc'}:
-        raise ValueError('sources 必須為 pchome 或 coolpc')
+    keyword_list = list(keywords if keywords is not None else (settings.PCHOME_KEYWORDS or DEFAULT_WATCH_LIST))
+    max_pages = settings.SYNC_MAX_PAGES if max_pages is None else max_pages
+    if not 1 <= max_pages <= 5 or len(keyword_list) > 50:
+        raise ValueError('每個關鍵字限制 1–5 頁，最多 50 個關鍵字。')
+    selected = resolve_sources(sources)
     stats = {'new': 0, 'price_updated': 0, 'unchanged': 0, 'scanned': 0}
     source_stats = {}
-
-    for source in ('pchome', 'coolpc'):
-        if source not in enabled_sources:
-            continue
+    for source in selected:
+        adapter = SOURCES[source]
+        spider = adapter.spider()
         seen_ids = set()
-        if source == 'pchome':
-            spider = PChomeSpider()
-            items = (item for keyword in keyword_list
-                     for item in spider.run(keyword, max_pages=max_pages))
-        else:
-            spider = CoolPCSpider()
-            items = spider.run()
+        existing_count = Product.objects.filter(source=source, is_active=True).count()
+        items = (item for keyword in keyword_list for item in spider.run(keyword, max_pages=max_pages)) if source == 'pchome' else spider.run()
         try:
             for item in items:
+                # Duplicate search hits must not inflate counts or overwrite newer prices.
+                if item['id'] in seen_ids:
+                    continue
+                item['source'] = source
                 result = _save_product(item, seen_ids)
                 stats[result] += 1
                 stats['scanned'] += 1
         except SourceUnavailable:
-            logger.warning('原價屋同步已暫停，保留既有資料。', exc_info=True)
-            source_stats[source] = {'scanned': 0, 'delisted': 0, 'state': 'backoff'}
+            logger.warning('%s 更新暫停，保留既有資料。', source, exc_info=True)
+            source_stats[source] = {'scanned': len(seen_ids), 'delisted': 0, 'state': 'backoff'}
             continue
-        # A failed/empty scrape must never delist a complete source. A limited
-        # keyword sync is also not evidence that all other products disappeared.
+        finally:
+            for category, _ in Product.CATEGORY_CHOICES:
+                cache.delete(f'comparison-v2:{source}:{category}')
         delisted = 0
-        existing_count = Product.objects.filter(source=source, is_active=True).count()
-        if (source == 'coolpc' and len(seen_ids) >= 50
-                and (existing_count == 0 or len(seen_ids) >= existing_count * 0.8)):
-            delisted = Product.objects.filter(source=source, is_active=True).exclude(
-                id__in=seen_ids).update(is_active=False, delisted_at=timezone.now())
-        source_stats[source] = {'scanned': len(seen_ids), 'delisted': delisted,
-                                'state': 'cached' if getattr(spider, 'skipped', False) else 'updated'}
-        for category, _ in Product.CATEGORY_CHOICES:
-            cache.delete(f'comparison-v1:{source}:{category}')
-
+        if (adapter.full_catalog and len(seen_ids) >= 50
+                and (not existing_count or len(seen_ids) >= existing_count * 0.8)):
+            delisted = Product.objects.filter(source=source, is_active=True).exclude(id__in=seen_ids).update(
+                is_active=False, delisted_at=timezone.now())
+        state = 'cached' if getattr(spider, 'skipped', False) else ('updated' if seen_ids else 'empty')
+        source_stats[source] = {'scanned': len(seen_ids), 'delisted': delisted, 'state': state}
     finished_at = timezone.now()
     summary = {
-        'started_at': started_at.isoformat(),
-        'finished_at': finished_at.isoformat(),
+        'started_at': started_at.isoformat(), 'finished_at': finished_at.isoformat(),
         'duration_seconds': round((finished_at - started_at).total_seconds(), 1),
-        'keywords_synced': len(keyword_list),
-        'scanned': stats['scanned'],
-        'new_products': stats['new'],
-        'price_updated': stats['price_updated'],
+        'keywords_synced': len(keyword_list), 'scanned': stats['scanned'],
+        'new_products': stats['new'], 'price_updated': stats['price_updated'],
         'unchanged': stats['unchanged'],
-        'delisted': sum(value['delisted'] for value in source_stats.values()),
-        'sources': source_stats,
+        'delisted': sum(value['delisted'] for value in source_stats.values()), 'sources': source_stats,
     }
-    logger.info("[sync_products] %s", summary)
+    logger.info('[sync_products] %s', summary)
     return summary
 
 
-def sync_products(keywords=None, max_pages=2, sources=None, reservation=None):
+def sync_products(keywords=None, max_pages=None, sources=None, reservation=None):
     handle = reservation if reservation is not None else reserve_sync()
     with handle:
         try:

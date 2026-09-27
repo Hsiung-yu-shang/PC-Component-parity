@@ -106,7 +106,21 @@ class SyncTests(SimpleTestCase):
         from core.crawler import PChomeSpider
         spider = PChomeSpider()
         spider.session = MagicMock()
-        spider.session.get.return_value.status_code = 429
-        self.assertEqual(list(spider.run('CPU')), [])
+        spider.session.get.return_value = self.response(429)
+        with self.assertRaises(SourceUnavailable):
+            list(spider.run('CPU'))
         self.assertEqual(list(spider.run('SSD')), [])
         self.assertEqual(spider.session.get.call_count, 1)
+
+    def test_pchome_backoff_survives_new_worker(self):
+        from core.crawler import PChomeSpider
+        spider = PChomeSpider()
+        spider.session = MagicMock()
+        spider.session.get.return_value = self.response(429, headers={'Retry-After': '172800'})
+        with self.assertRaises(SourceUnavailable):
+            list(spider.run('CPU'))
+        fresh = PChomeSpider()
+        fresh.session = MagicMock()
+        self.assertEqual(list(fresh.run('CPU')), [])
+        fresh.session.get.assert_not_called()
+        self.assertGreater(read_state('pchome.json')['next_allowed'], time.time() + 172790)

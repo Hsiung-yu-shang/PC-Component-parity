@@ -4,6 +4,8 @@ from django.core.cache import cache
 from django.db.models import OuterRef, Subquery
 from .models import Product, PriceHistory
 from .product_names import clean_name, normalized
+from .freshness import is_stale
+from .sources import SOURCES
 
 BRANDS = {
     'ASUS': ('ASUS', '華碩'), 'MSI': ('MSI', '微星'),
@@ -32,7 +34,7 @@ def identity(name, category):
             match = re.search(r'\b(?:CORE\s*)?ULTRA\s*[3579][ -]+(\d{3}[A-Z]{0,2})\b', text)
             family = 'INTEL'
         if not match and ('AMD' in brands or 'RYZEN' in text):
-            match = re.search(r'(?<![A-Z0-9])(\d{4}(?:X3D|XT|GE|X|G|F)?)(?![A-Z0-9])', text)
+            match = re.search(r'(?:RYZEN\s*[3579]?|R[3579]|AMD)\s*(\d{4}(?:X3D|XT|GE|X|G|F)?)(?![A-Z0-9])', text)
             family = 'AMD'
         if not match and 'INTEL' in brands:
             match = re.search(r'(?<![A-Z0-9])(1[0-9]\d{3}(?:KF|KS|K|F|T)?)(?![A-Z0-9])', text)
@@ -55,7 +57,7 @@ def identity(name, category):
             return None
     # Different capacities, memory generations and physical/package variants conflict.
     capacities = {str(float(n) * (1024 if unit == 'T' else 1))
-                  for n, unit in re.findall(r'(?<![A-Z0-9])(\d+(?:\.\d+)?)\s*([GT])(?:B)?\b', text)}
+                  for n, unit in re.findall(r'(?<![A-Z0-9])(\d+(?:\.\d+)?)\s*([GT])(?:B)?(?![A-Z0-9])', text)}
     if category in ('SSD', 'RAM') and not capacities:
         return None
     variants = set(re.findall(r'\b(?:DDR[345]|TI|SUPER|XTX|XT|OC|WIFI|WHITE|BLACK|II|III|V[234])\b', text))
@@ -82,26 +84,28 @@ def same_model(left, right):
 
 def comparisons(product):
     signature = identity(product.name, product.category)
-    if not signature or product.source not in ('pchome', 'coolpc'):
+    if not signature or product.source not in SOURCES:
         return []
-    other = 'coolpc' if product.source == 'pchome' else 'pchome'
-    key = f'comparison-v1:{other}:{product.category}'
-    candidates = cache.get(key)
-    if candidates is None:
-        latest = PriceHistory.objects.filter(product_id=OuterRef('pk')).order_by('-crawled_at', '-pk')
-        candidates = list(Product.objects.filter(source=other, category=product.category, is_active=True)
-            .annotate(latest_price=Subquery(latest.values('price')[:1]))
-            .values('id', 'name', 'source', 'product_url', 'latest_price', 'last_updated'))
-        for item in candidates:
-            item['_identity'] = identity(item['name'], product.category)
-        cache.set(key, candidates, 300)
     matches = []
-    for candidate in candidates:
-        if candidate['latest_price'] is None or not same_model(signature, candidate['_identity']):
+    for other, source in SOURCES.items():
+        if other == product.source:
             continue
-        item = {k: v for k, v in candidate.items() if not k.startswith('_')}
-        item['name'] = clean_name(item['name'], other)
-        item['channel'] = '實體通路' if other == 'coolpc' else '線上購物'
-        item['match_note'] = '型號與可辨識規格相符，購買前請核對包裝及保固。'
-        matches.append(item)
-    return sorted(matches, key=lambda item: (item['latest_price'], item['id']))[:10]
+        key = f'comparison-v2:{other}:{product.category}'
+        candidates = cache.get(key)
+        if candidates is None:
+            latest = PriceHistory.objects.filter(product_id=OuterRef('pk')).order_by('-crawled_at', '-pk')
+            candidates = list(Product.objects.filter(source=other, category=product.category, is_active=True)
+                .annotate(latest_price=Subquery(latest.values('price')[:1]))
+                .values('id', 'name', 'source', 'category', 'product_url', 'latest_price', 'last_updated'))
+            for item in candidates:
+                item['_identity'] = identity(item['name'], product.category)
+            cache.set(key, candidates, 300)
+        for candidate in candidates:
+            if candidate['latest_price'] is None or not same_model(signature, candidate['_identity']):
+                continue
+            item = {k: v for k, v in candidate.items() if not k.startswith('_')}
+            item.update(name=clean_name(item['name'], other), channel=source.channel,
+                        source_label=source.label, price_stale=is_stale(item['last_updated']),
+                        is_active=True, match_note='型號與可辨識規格相符，購買前請核對包裝及保固。')
+            matches.append(item)
+    return sorted(matches, key=lambda item: (item['price_stale'], item['latest_price'], item['id']))[:10]

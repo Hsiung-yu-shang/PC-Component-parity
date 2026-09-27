@@ -11,10 +11,9 @@ from bs4 import BeautifulSoup
 from .crawler import PChomeSpider
 from .product_names import clean_name
 from .sync_state import lock, read_state, write_state
+from .source_errors import SourceUnavailable
+from django.conf import settings
 
-
-class SourceUnavailable(Exception):
-    pass
 
 
 class CoolPCSpider:
@@ -47,9 +46,12 @@ class CoolPCSpider:
                 match = re.search(r',\s*\$\s*([\d,]+)', label)
                 if not match:
                     continue
-                price = int(match.group(1).replace(',', ''))
+                digits = match.group(1).replace(',', '')
+                if len(digits) > 10 or not digits.isdigit():
+                    continue
+                price = int(digits)
                 name = label[:match.start()].strip()
-                if not name or price <= 100:
+                if not name or not 100 < price <= 2147483647:
                     continue
                 name = parser.remove_emoji(name)[:255]
                 _, specs = parser.analyze_specs(name, '')
@@ -73,7 +75,7 @@ class CoolPCSpider:
                 self.skipped = True
                 return
             # Reserve before network I/O, so a crash cannot cause an immediate retry.
-            state['next_allowed'] = now + 6 * 3600
+            state['next_allowed'] = now + max(21600, settings.COOLPC_MIN_INTERVAL_SECONDS)
             write_state('coolpc.json', state)
             try:
                 fetched_robots = now >= state.get('robots_expires', 0)

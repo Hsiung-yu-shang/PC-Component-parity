@@ -70,3 +70,38 @@ curl -fsSLo /tmp/pcpart-install.sh https://raw.githubusercontent.com/Hsiung-yu-s
 重新載入 `http://10.10.0.249:8080/`，分別從兩個來源進入相同型號商品，確認比價與實體通路標籤。清除 `{}` 不需要先跑爬蟲。正式網域前請確認 Cloudflare HTTPS；安全 Cookie 預設啟用，直接透過 HTTP IP 測試商品頁不受影響，Django admin 登入應使用 HTTPS。
 
 安全檢測結果與適用範圍見 [SECURITY_REVIEW.md](SECURITY_REVIEW.md)。
+
+## 來源設定與擴充
+
+以下欄位可加到既有 `/root/pcpart.env`，未填時沿用預設值；修改後重新執行安裝腳本，讓服務讀到新設定。
+
+| 欄位 | 預設／用途 |
+| --- | --- |
+| `SYNC_SOURCES` | `pchome,coolpc`；可只填 `coolpc` 或 `pchome`。明確留空暫停全部同步，既有價格仍可查詢。 |
+| `PCHOME_KEYWORDS` | 逗號分隔，例如 `AMD Ryzen 7,SSD 2TB,DDR5 32GB`；空白使用內建清單，最多 50 個。PChome 為取樣搜尋，並非完整商品目錄。 |
+| `SYNC_MAX_PAGES` | `2`；每關鍵字 1–5 頁。 |
+| `COOLPC_MIN_INTERVAL_SECONDS` | `21600`；可延長原價屋冷卻，不能縮短至六小時以下。 |
+| `PRICE_STALE_HOURS` | `48`；超過最後確認時間即顯示舊價格提醒，最小 6 小時。 |
+| `DB_SSL_CA` | 預設空白；填資料庫 CA 的絕對路徑後，要求 TLS 並驗證伺服器身分。 |
+
+來源選單由 `/api/sources/` 提供；管理員更新只同步所選來源，全部則同步啟用的來源。停用同步不會刪除該來源的歷史商品。單一來源被擋／逾時時，另一來源仍可完成更新。PChome 請求至少間隔兩秒，403／429 至少退避 24 小時並保存在共用目錄。
+
+新增第三個來源需新增經審核的爬蟲、在 `core/sources.py` 註冊、接上 `core/services.py` 的資料迭代方式，並更新前端 `storeUrl.js` 的 HTTPS 網域白名單及測試。商品 ID 必須避免與既有来源碰撞。不能只填任意 URL 就抓取，以免形成內網存取或惡意連結漏洞。
+
+詳情只預覽最近 100 筆價格與評論；完整紀錄可透過 `/api/products/<id>/history/` 與 `/api/products/<id>/reviews/` 分頁讀取（每頁 20 筆）。已下架商品仍可讀歷史詳情，但不出現在預設列表／比價結果。舊 `interactive.py` 改為查詢資料庫，不會因互動查詢爬取來源。
+
+## 資料庫 TLS 與部署驗收
+
+`DB_SSL_CA` 要填真正的 CA 檔案，例如 `/etc/pcpart/mysql-ca.pem`，且 `pcpart` 使用者能讀取。資料庫憑證 SAN 必須符合 `DB_HOST`：若使用 `10.10.0.241`，憑證必須包含該 IP，否則使用憑證對應的內網 DNS 名稱。沒有配置前，不宣稱已驗證資料庫 TLS；不要以關閉驗證來解決憑證不符。
+
+安裝程式會先以 `pcpart` 身分檢查 DB 連線，再建置前端；啟動後 `/api/health/` 必須能查到商品表，才回報安裝完成。`manage.py check --deploy` 的 HTTPS/HSTS 警告需依 Cloudflare Tunnel 架構處理，不應為消除警告就對 HTTP origin 強制 Django HTTPS redirect。
+
+更新後在 LXC 驗收：
+
+```bash
+curl -fsS http://127.0.0.1:8080/api/health/
+curl -fsS http://127.0.0.1:8080/api/sources/
+systemctl status pcpart-api pcpart-sync.timer --no-pager
+```
+
+再以正式 HTTPS 網域驗證來源切換、搜尋、雙向比價和 `/admin/` 登入。CSRF 信任來源未明確指定時，預設沿用 `CORS_ALLOWED_ORIGINS`；若 admin 使用另一網域，請在 `CSRF_TRUSTED_ORIGINS` 加入該完整 HTTPS origin。

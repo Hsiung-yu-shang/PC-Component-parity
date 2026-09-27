@@ -22,10 +22,11 @@ const formatDate = (dateString) => {
 }
 
 const goToStore = () => {
-  window.open(storeUrl(props.product), '_blank', 'noopener,noreferrer')
+  const url = storeUrl(props.product)
+  if (url) window.open(url, '_blank', 'noopener,noreferrer')
 }
 
-const otherStore = computed(() => props.product.source === 'coolpc' ? 'PChome' : '原價屋')
+const otherStore = '其他通路'
 const priceDifference = (price) => {
   if (props.product.latest_price == null) return ''
   const delta = price - props.product.latest_price
@@ -62,7 +63,7 @@ const smartTips = computed(() => {
       tips.push({
         type: 'info',
         title: '!!CPU 搭配建議',
-        msg: `此主機板腳位為 **${specs.socket}**，請搭配對應的處理器（例如：Intel 12/13/14代 或 AMD Ryzen 7000系列）。`
+        msg: `此主機板腳位為 **${specs.socket}**，請搭配對應的處理器，並確認主機板的 CPU 支援清單與 BIOS 版本。`
       })
     }
   }
@@ -73,7 +74,7 @@ const smartTips = computed(() => {
       tips.push({
         type: 'warning',
         title: '!!腳位匹配提醒',
-        msg: `此 CPU 使用 **${specs.socket}** 腳位，請搭配支援 ${specs.socket} 晶片組的主機板。`
+        msg: `此 CPU 使用 **${specs.socket}** 腳位，請搭配相同腳位的主機板，並確認 CPU 支援清單與 BIOS 版本。`
       })
     }
   }
@@ -94,7 +95,7 @@ const smartTips = computed(() => {
     tips.push({
       type: 'warning',
       title: '!!電源瓦數建議',
-      msg: '高階顯示卡瞬間功耗較大，建議搭配 **750W 或 850W 以上** 的金牌電源供應器，並確認機殼長度是否足夠容納顯卡。'
+      msg: '請依顯示卡廠商建議與整機耗電量選擇電源，並確認供電接頭、機殼長度與厚度空間。'
     })
   }
 
@@ -114,7 +115,7 @@ const smartTips = computed(() => {
         </svg>
         返回列表
       </button>
-      <span class="text-xs text-gray-500">{{ product.source === 'coolpc' ? '原價屋 · 實體通路' : 'PChome · 線上購物' }}</span>
+      <span class="text-xs text-gray-500">{{ product.source_label || product.source }} · {{ product.channel }}</span>
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 gap-0">
@@ -167,16 +168,18 @@ const smartTips = computed(() => {
           </div>
         </div>
 
+        <p v-if="product.is_active === false" class="text-red-700 mb-3">此商品已下架，以下為歷史紀錄。</p>
+        <p v-if="product.price_stale" class="text-amber-700 mb-3">價格較久未更新，購買前請向通路確認。</p>
         <div class="mt-auto border-t border-gray-100 pt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div>
             <span class="block text-xs text-gray-400">此通路最新紀錄價格</span>
             <span class="text-3xl font-extrabold text-red-600">
-              ${{ (product.latest_price || product.price || 0).toLocaleString() }}
+              {{ product.latest_price == null ? '尚無報價' : `NT$ ${product.latest_price.toLocaleString()}` }}
             </span>
           </div>
           
           <button 
-            @click="goToStore"
+            @click="goToStore" :disabled="!storeUrl(product) || product.is_active === false"
             class="w-full sm:w-auto bg-gray-900 hover:bg-black text-white px-8 py-4 rounded-xl font-bold text-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-0.5 flex items-center justify-center gap-2">
             前往{{ product.source === 'coolpc' ? '原價屋估價頁' : 'PChome 購買' }}
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -198,18 +201,19 @@ const smartTips = computed(() => {
       <div v-else-if="product.comparisons?.length" class="mt-5 space-y-4">
         <article v-for="offer in product.comparisons" :key="offer.id" class="rounded-xl border border-gray-200 p-4 sm:flex sm:items-center sm:justify-between gap-4">
           <div>
-            <span class="text-sm font-bold">{{ offer.source === 'coolpc' ? '原價屋' : 'PChome' }}</span>
+            <span class="text-sm font-bold">{{ offer.source_label || offer.source }}</span>
             <span class="ml-2 rounded bg-blue-50 px-2 py-1 text-xs text-blue-800">{{ offer.channel }}</span>
             <h3 class="mt-3 font-medium text-gray-900">{{ offer.name }}</h3>
             <p class="mt-1 text-xs text-gray-500">更新於 {{ formatDate(offer.last_updated) }}</p>
             <p class="mt-1 text-xs text-gray-500">{{ offer.match_note }}</p>
+            <p v-if="offer.price_stale" class="mt-1 text-xs text-amber-700">價格較久未更新，請向通路確認。</p>
           </div>
           <div class="mt-4 sm:mt-0 shrink-0">
             <p class="text-xl font-bold text-red-600">NT$ {{ offer.latest_price.toLocaleString() }}</p>
             <p class="mt-1 text-sm text-gray-600">{{ priceDifference(offer.latest_price) }}</p>
             <div class="mt-3 flex gap-3 text-sm text-blue-700">
               <button class="underline" @click="emit('open', offer)">查看詳情</button>
-              <a class="underline" :href="storeUrl(offer)" target="_blank" rel="noopener noreferrer">前往通路</a>
+              <a v-if="storeUrl(offer)" class="underline" :href="storeUrl(offer)" target="_blank" rel="noopener noreferrer">前往通路</a>
             </div>
           </div>
         </article>
