@@ -118,7 +118,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Taipei'
 
 USE_I18N = True
 
@@ -131,6 +131,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/3.2/howto/static-files/
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/3.2/ref/settings/#default-auto-field
@@ -156,5 +157,27 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
+    'DEFAULT_RENDERER_CLASSES': ['rest_framework.renderers.JSONRenderer'],
     'DEFAULT_FILTER_BACKENDS': ['django_filters.rest_framework.DjangoFilterBackend'],
 }
+
+# Private, persistent synchronization state shared by systemd and Gunicorn.
+SYNC_STATE_DIR = config('SYNC_STATE_DIR', default='/var/lib/pcpart' if Path('/var/lib/pcpart').is_dir() else str(BASE_DIR / '.sync-state'))
+SESSION_COOKIE_SECURE = config('SESSION_COOKIE_SECURE', default=True, cast=bool)
+CSRF_COOKIE_SECURE = config('CSRF_COOKIE_SECURE', default=True, cast=bool)
+SECURE_SSL_REDIRECT = config('SECURE_SSL_REDIRECT', default=False, cast=bool)
+SECURE_HSTS_SECONDS = config('SECURE_HSTS_SECONDS', default=0, cast=int)
+CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', default=','.join(CORS_ALLOWED_ORIGINS), cast=Csv())
+DATA_UPLOAD_MAX_MEMORY_SIZE = 65536
+
+# Only registered adapters can be enabled; an empty list pauses automatic refresh.
+SYNC_SOURCES = config('SYNC_SOURCES', default='pchome,coolpc', cast=Csv())
+PCHOME_KEYWORDS = config('PCHOME_KEYWORDS', default='', cast=Csv())
+SYNC_MAX_PAGES = config('SYNC_MAX_PAGES', default=2, cast=int)
+COOLPC_MIN_INTERVAL_SECONDS = config('COOLPC_MIN_INTERVAL_SECONDS', default=21600, cast=int)
+PRICE_STALE_HOURS = max(6, config('PRICE_STALE_HOURS', default=48, cast=int))
+DATABASES['default']['OPTIONS'] = {'connect_timeout': 5, 'local_infile': False}
+# Opt-in CA verification, no silently disabled verification setting.
+DB_SSL_CA = config('DB_SSL_CA', default='')
+if DB_SSL_CA:
+    DATABASES['default']['OPTIONS'].update(ssl={'ca': DB_SSL_CA}, ssl_mode='VERIFY_IDENTITY')

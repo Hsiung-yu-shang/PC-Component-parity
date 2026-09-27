@@ -4,10 +4,10 @@ from .models import Product, PriceHistory, ProductReview
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
     # === [關鍵修改] 在列表顯示分類 ===
-    list_display = ('id', 'category', 'name', 'last_updated')
+    list_display = ('id', 'source', 'category', 'name', 'is_active', 'last_updated')
     
     # 增加過濾器：可以用「分類」來篩選 (例如只看主機板)
-    list_filter = ('category', 'last_updated')
+    list_filter = ('source', 'category', 'is_active', 'last_updated')
     
     search_fields = ('name', 'id')
     ordering = ('name',)

@@ -1,7 +1,19 @@
-Django==3.2.25
-djangorestframework==3.15.1
-django-cors-headers==3.10.1
-django-filter==21.1
-mysqlclient==2.1.1
-requests==2.27.1
+# Audited runtime versions; update together and rerun pip-audit.
+asgiref==3.12.1
+beautifulsoup4==4.15.0
+certifi==2026.7.22
+charset-normalizer==3.5.1
+django==5.2.17
+django-cors-headers==4.9.0
+django-filter==25.2
+djangorestframework==3.17.2
+gunicorn==23.0.0
+idna==3.20
+mysqlclient==2.2.8
+packaging==26.3
 python-decouple==3.8
+requests==2.34.2
+soupsieve==2.10
+sqlparse==0.6.0
+typing_extensions==4.16.0
+urllib3==2.8.0

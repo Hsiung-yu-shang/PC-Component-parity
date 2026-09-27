@@ -1,11 +1,18 @@
 import requests
 import time
-import random
+import json
+import logging
+from email.utils import parsedate_to_datetime
+from .source_errors import SourceUnavailable
+from .sync_state import read_state, write_state
 import re
 from typing import Dict, List, Generator
 
 class PChomeSpider:
     def __init__(self):
+        self.blocked = False
+        self.skipped = False
+        self._last_request = 0
         self.base_url = "https://ecshweb.pchome.com.tw/search/v3.3/all/results"
         self.headers = {
             "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -25,17 +32,46 @@ class PChomeSpider:
         ]
 
     def fetch_data(self, keyword: str, page: int) -> List[Dict]:
-        try:
-            response = self.session.get(
-                self.base_url, 
-                params={'q': keyword, 'page': page, 'sort': 'sale/dc'}, 
-                timeout=10
-            )
-            response.raise_for_status()
-            return response.json().get('prods', [])
-        except Exception as e:
-            print(f"[Error] {keyword} Page {page}: {e}")
+        if self.blocked:
             return []
+        state = read_state('pchome.json')
+        if time.time() < state.get('next_allowed', 0):
+            self.skipped = True
+            return []
+        wait = 2 - (time.monotonic() - self._last_request)
+        if wait > 0:
+            time.sleep(wait)
+        self._last_request = time.monotonic()
+        try:
+            with self.session.get(self.base_url, params={'q': keyword, 'page': page, 'sort': 'sale/dc'},
+                                  timeout=(10, 20), allow_redirects=False, stream=True) as response:
+                if response.status_code != 200:
+                    delay = 86400 if response.status_code in (403, 429) else 21600
+                    until = time.time() + delay
+                    retry = response.headers.get('Retry-After', '')
+                    if retry:
+                        try:
+                            requested = time.time() + int(retry) if retry.isdigit() else parsedate_to_datetime(retry).timestamp()
+                            until = max(until, requested)
+                        except (ValueError, TypeError, OverflowError):
+                            pass
+                    state['next_allowed'] = until
+                    raise SourceUnavailable('PChome 暫停回應，保留既有價格。')
+                chunks, size = [], 0
+                for chunk in response.iter_content(65536):
+                    size += len(chunk)
+                    if size > 4 * 1024 * 1024:
+                        raise SourceUnavailable('PChome 回應超過限制。')
+                    chunks.append(chunk)
+                data = json.loads(b''.join(chunks))
+                if not isinstance(data, dict) or not isinstance(data.get('prods'), list):
+                    raise SourceUnavailable('PChome 回應格式改變。')
+                return data['prods']
+        except (requests.RequestException, ValueError, SourceUnavailable) as exc:
+            self.blocked = True
+            state['next_allowed'] = max(state.get('next_allowed', 0), time.time() + 21600)
+            write_state('pchome.json', state)
+            raise SourceUnavailable('PChome 更新失敗，已暫停抓取。') from exc
 
     def analyze_specs(self, name: str, describe: str) -> (str, Dict):
         """
@@ -147,25 +183,30 @@ class PChomeSpider:
 
     def parse_product(self, raw_data: Dict) -> Dict:
         raw_name = raw_data.get('name', '').strip()
-        raw_describe = raw_data.get('describe', '')
+        raw_describe = raw_data.get('describe') or ''
         
-        clean_name = self.remove_emoji(raw_name)
+        clean_name = self.remove_emoji(raw_name)[:255]
         clean_describe = self.remove_emoji(raw_describe)
         
         category, specs = self.analyze_specs(clean_name, clean_describe)
+        picture = raw_data.get('picS')
+        picture = 'https://cs-a.ecimg.tw' + picture if isinstance(picture, str) and picture.startswith('/') and len(picture) <= 480 else ''
 
         return {
             "id": raw_data.get('Id'),
+            "source": "pchome",
+            "product_url": f"https://24h.pchome.com.tw/prod/{raw_data.get('Id')}",
             "name": clean_name,
             "price": int(raw_data.get('price', 0)),
-            "picS": f"https://cs-a.ecimg.tw{raw_data.get('picS')}" if raw_data.get('picS') else "",
+            "picS": picture,
             "describe": clean_describe,
             "category": category,
             "specs": specs
         }
 
     def is_valid(self, product: Dict) -> bool:
-        if not product['id'] or product['price'] <= 100:
+        if (not isinstance(product['id'], str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', product['id'])
+                or not product['name'] or not 100 < product['price'] <= 2147483647):
             return False
 
         prod_name = product['name'].upper()
@@ -182,8 +223,9 @@ class PChomeSpider:
                 break
 
             for raw_prod in raw_products:
-                clean_prod = self.parse_product(raw_prod)
-                if self.is_valid(clean_prod):
-                    yield clean_prod
-            
-            time.sleep(random.uniform(1, 2))
+                try:
+                    clean_prod = self.parse_product(raw_prod)
+                    if self.is_valid(clean_prod):
+                        yield clean_prod
+                except (AttributeError, TypeError, ValueError):
+                    logging.getLogger(__name__).warning('略過格式不符的 PChome 商品。')
